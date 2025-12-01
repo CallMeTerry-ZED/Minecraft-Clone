@@ -1,0 +1,98 @@
+# --------------------------------------------------------
+# Core Defaults
+# --------------------------------------------------------
+
+# Auto-detect text files and normalize line endings
+* text=auto eol=lf
+
+# Explicit C/C++ LF normalization
+*.c          text eol=lf
+*.cpp        text eol=lf
+*.cc         text eol=lf
+*.h          text eol=lf
+*.hpp        text eol=lf
+*.inl        text eol=lf
+
+# Scripts
+*.sh         text eol=lf
+*.bash       text eol=lf
+*.ps1        text eol=lf
+*.bat        text eol=crlf
+
+# Config formats
+*.json       text eol=lf
+*.yaml       text eol=lf
+*.yml        text eol=lf
+*.toml       text eol=lf
+*.ini        text eol=lf
+*.cfg        text eol=lf
+
+# CMake
+CMakeLists.txt text eol=lf
+*.cmake        text eol=lf
+
+# --------------------------------------------------------
+# Git LFS — Game Assets
+# --------------------------------------------------------
+
+# Textures
+*.png  filter=lfs diff=lfs merge=lfs -text
+*.jpg  filter=lfs diff=lfs merge=lfs -text
+*.jpeg filter=lfs diff=lfs merge=lfs -text
+*.tga  filter=lfs diff=lfs merge=lfs -text
+*.bmp  filter=lfs diff=lfs merge=lfs -text
+
+# Texture arrays / compressed formats (OpenGL-friendly)
+*.dds  filter=lfs diff=lfs merge=lfs -text
+*.ktx  filter=lfs diff=lfs merge=lfs -text
+
+# Models
+*.obj  filter=lfs diff=lfs merge=lfs -text
+*.fbx  filter=lfs diff=lfs merge=lfs -text
+*.dae  filter=lfs diff=lfs merge=lfs -text
+*.gltf filter=lfs diff=lfs merge=lfs -text
+*.glb  filter=lfs diff=lfs merge=lfs -text
+
+# Audio
+*.wav  filter=lfs diff=lfs merge=lfs -text
+*.mp3  filter=lfs diff=lfs merge=lfs -text
+*.ogg  filter=lfs diff=lfs merge=lfs -text
+
+# Fonts
+*.ttf  filter=lfs diff=lfs merge=lfs -text
+*.otf  filter=lfs diff=lfs merge=lfs -text
+
+# Save/world data
+*.bin  filter=lfs diff=lfs merge=lfs -text
+*.dat  filter=lfs diff=lfs merge=lfs -text
+*.region filter=lfs diff=lfs merge=lfs -text
+*.chunk  filter=lfs diff=lfs merge=lfs -text
+
+# --------------------------------------------------------
+# OpenGL Shader Files (text — DO NOT PUT IN LFS)
+# --------------------------------------------------------
+
+# Common GLSL shader extensions
+*.vert text eol=lf
+*.frag text eol=lf
+*.geom text eol=lf
+*.tesc text eol=lf
+*.tese text eol=lf
+*.comp text eol=lf
+*.glsl text eol=lf
+
+# Shaders directory as text
+shaders/* text eol=lf
+
+# --------------------------------------------------------
+# Misc Binary Assets
+# --------------------------------------------------------
+*.zip  filter=lfs diff=lfs merge=lfs -text
+*.7z   filter=lfs diff=lfs merge=lfs -text
+*.pak  filter=lfs diff=lfs merge=lfs -text
+
+# --------------------------------------------------------
+# Documentation Images
+# --------------------------------------------------------
+docs/*.png  filter=lfs diff=lfs merge=lfs -text
+docs/*.jpg  filter=lfs diff=lfs merge=lfs -text
