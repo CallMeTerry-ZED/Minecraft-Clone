@@ -3,6 +3,7 @@
  */
 
 #include "World/ChunkManager.h"
+#include "Physics/PhysicsManager.h"
 #include <spdlog/spdlog.h>
 
 namespace MinecraftClone
@@ -11,11 +12,13 @@ namespace MinecraftClone
         : m_world(nullptr)
         , m_terrainGenerator(nullptr)
         , m_chunkRenderer(nullptr)
+        , m_physicsManager(nullptr)
         , m_currentChunk(0, 0)
         , m_lastUpdateChunk(INT_MAX, INT_MAX)
         , m_renderDistance(8)  // Default render distance
         , m_loadDistance(10)    // Keep chunks loaded slightly beyond render distance
         , m_initialized(false)
+        , m_lastUpdateTime(0.0f)
     {
     }
 
@@ -29,7 +32,7 @@ namespace MinecraftClone
         spdlog::info("ChunkManager initialized with render distance: {}, load distance: {}", m_renderDistance, m_loadDistance);
     }
 
-    void ChunkManager::Update(const glm::vec3& playerPosition)
+    void ChunkManager::Update(const glm::vec3& playerPosition, float deltaTime)
     {
         if (!m_initialized || !m_world || !m_terrainGenerator || !m_chunkRenderer)
         {
@@ -44,12 +47,19 @@ namespace MinecraftClone
 
         m_currentChunk = chunkCoords;
 
-        // Only update if player moved to a different chunk
-        if (chunkCoords != m_lastUpdateChunk)
+        // Throttle chunk updates to prevent excessive loading
+        m_lastUpdateTime += deltaTime;
+        bool shouldUpdate = (chunkCoords != m_lastUpdateChunk) || (m_lastUpdateTime >= UPDATE_INTERVAL);
+        
+        if (shouldUpdate)
         {
             UpdateChunks(playerPosition);
             m_lastUpdateChunk = chunkCoords;
+            m_lastUpdateTime = 0.0f;
         }
+
+        // Process queued chunk loading (gradual loading to prevent hangs)
+        ProcessChunkQueue();
     }
 
     void ChunkManager::UpdateChunks(const glm::vec3& playerPosition)
@@ -75,12 +85,13 @@ namespace MinecraftClone
             }
         }
 
-        // Load new chunks
+        // Queue new chunks for loading (instead of loading immediately)
         for (const auto& chunkCoord : chunksToLoad)
         {
-            if (m_loadedChunks.find(chunkCoord) == m_loadedChunks.end())
+            if (m_loadedChunks.find(chunkCoord) == m_loadedChunks.end() && 
+                m_chunksToLoad.find(chunkCoord) == m_chunksToLoad.end())
             {
-                LoadChunk(chunkCoord.first, chunkCoord.second);
+                m_chunksToLoad.insert(chunkCoord);
             }
         }
 
@@ -99,8 +110,28 @@ namespace MinecraftClone
             UnloadChunk(chunkCoord.first, chunkCoord.second);
         }
 
-        spdlog::debug("ChunkManager: Loaded {} chunks, current chunk: ({}, {})",
-                     m_loadedChunks.size(), centerChunkX, centerChunkZ);
+        // Only log when chunk count changes significantly
+        static size_t lastChunkCount = 0;
+        if (std::abs(static_cast<int>(m_loadedChunks.size()) - static_cast<int>(lastChunkCount)) > 5)
+        {
+            spdlog::info("ChunkManager: Loaded {} chunks, current chunk: ({}, {})",
+                         m_loadedChunks.size(), centerChunkX, centerChunkZ);
+            lastChunkCount = m_loadedChunks.size();
+        }
+    }
+
+    void ChunkManager::ProcessChunkQueue()
+    {
+        // Load a limited number of chunks per frame to prevent hangs
+        int chunksLoadedThisFrame = 0;
+        auto it = m_chunksToLoad.begin();
+        
+        while (it != m_chunksToLoad.end() && chunksLoadedThisFrame < MAX_CHUNKS_PER_FRAME)
+        {
+            LoadChunk(it->first, it->second);
+            it = m_chunksToLoad.erase(it);
+            chunksLoadedThisFrame++;
+        }
     }
 
     void ChunkManager::LoadChunk(int chunkX, int chunkZ)
@@ -127,10 +158,14 @@ namespace MinecraftClone
         // Update mesh
         m_chunkRenderer->UpdateChunk(chunk, chunkX, chunkZ, m_world);
 
+        // Add physics collision
+        if (m_physicsManager)
+        {
+            m_physicsManager->AddChunkCollision(chunk, chunkX, chunkZ, m_world);
+        }
+
         // Mark as loaded
         m_loadedChunks.insert(std::make_pair(chunkX, chunkZ));
-
-        spdlog::debug("Loaded chunk ({}, {})", chunkX, chunkZ);
     }
 
     void ChunkManager::UnloadChunk(int chunkX, int chunkZ)
@@ -138,6 +173,12 @@ namespace MinecraftClone
         if (!m_world || !m_chunkRenderer)
         {
             return;
+        }
+
+        // Remove physics collision
+        if (m_physicsManager)
+        {
+            m_physicsManager->RemoveChunkCollision(chunkX, chunkZ);
         }
 
         // Unload from renderer
@@ -148,8 +189,6 @@ namespace MinecraftClone
 
         // Remove from loaded set
         m_loadedChunks.erase(std::make_pair(chunkX, chunkZ));
-
-        spdlog::debug("Unloaded chunk ({}, {})", chunkX, chunkZ);
     }
 
     bool ChunkManager::ShouldLoadChunk(int chunkX, int chunkZ, int centerChunkX, int centerChunkZ) const
@@ -182,6 +221,7 @@ namespace MinecraftClone
         }
 
         m_loadedChunks.clear();
+        m_chunksToLoad.clear();
         m_initialized = false;
 
         spdlog::info("ChunkManager shut down");

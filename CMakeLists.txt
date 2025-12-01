@@ -177,6 +177,10 @@ add_executable(${PROJECT_NAME}
         include/Networking/YojimboMessageFactory.h
         src/Rendering/RemotePlayerRenderer.cpp
         include/Rendering/RemotePlayerRenderer.h
+        src/Rendering/Texture.cpp
+        include/Rendering/Texture.h
+        src/Rendering/BlockTextureRegistry.cpp
+        include/Rendering/BlockTextureRegistry.h
 )
 
 # Include directories
@@ -185,6 +189,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/stb        # For stb_image.h, etc.
         ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/soloud/include  # SoLoud headers
         ${GLAD_INCLUDE_DIR}  # GLAD headers (if generated)
+        ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/bullet3/src  # Bullet3 headers
 )
 
 # Link libraries
@@ -257,6 +262,18 @@ endif()
 target_compile_definitions(${PROJECT_NAME} PRIVATE
         $<$<CONFIG:Debug>:DEBUG>
         $<$<CONFIG:Debug>:_DEBUG>
+)
+
+# ============================================================================
+# Copy assets folder to output directory
+# ============================================================================
+
+# Copy assets folder next to the executable
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets"
+    "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/assets"
+    COMMENT "Copying assets folder to output directory"
 )
 
 # ============================================================================

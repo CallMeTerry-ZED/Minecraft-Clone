@@ -117,6 +117,26 @@ namespace MinecraftClone
         }
     }
 
+    void ChunkMeshGenerator::AddFace(ChunkMesh* mesh, const glm::vec3& position, BlockType blockType, int faceIndex)
+    {
+        // Standard UV coordinates for a face (0,0 to 1,1)
+        glm::vec2 uv0(0.0f, 0.0f);
+        glm::vec2 uv1(1.0f, 0.0f);
+        glm::vec2 uv2(1.0f, 1.0f);
+        glm::vec2 uv3(0.0f, 1.0f);
+
+        glm::vec3 normals[] = {
+            glm::vec3(0.0f, 0.0f, 1.0f),   // Front
+            glm::vec3(0.0f, 0.0f, -1.0f),  // Back
+            glm::vec3(-1.0f, 0.0f, 0.0f),  // Left
+            glm::vec3(1.0f, 0.0f, 0.0f),   // Right
+            glm::vec3(0.0f, 1.0f, 0.0f),   // Top
+            glm::vec3(0.0f, -1.0f, 0.0f)   // Bottom
+        };
+
+        mesh->AddFace(position, uv0, uv1, uv2, uv3, normals[faceIndex], faceIndex);
+    }
+
     std::unique_ptr<ChunkMesh> ChunkMeshGenerator::GenerateMesh(Chunk* chunk, int chunkX, int chunkZ, World* world)
     {
         auto mesh = std::make_unique<ChunkMesh>();
@@ -149,7 +169,6 @@ namespace MinecraftClone
                         continue;
                     }
 
-                    glm::vec3 blockColor = GetBlockColor(block.GetType());
                     glm::vec3 blockPos = glm::vec3(
                         static_cast<float>(chunkX * CHUNK_SIZE_X + x),
                         static_cast<float>(y),
@@ -161,7 +180,7 @@ namespace MinecraftClone
                     {
                         if (ShouldRenderFace(chunk, x, y, z, face, world, chunkX, chunkZ))
                         {
-                            mesh->AddFace(blockPos, blockColor, normals[face], face);
+                            AddFace(mesh.get(), blockPos, block.GetType(), face);
                         }
                     }
                 }

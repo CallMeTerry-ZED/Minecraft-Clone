@@ -18,6 +18,7 @@ namespace MinecraftClone
     {
     public:
         static std::unique_ptr<ChunkMesh> GenerateMesh(Chunk* chunk, int chunkX, int chunkZ, World* world);
+        static void AddFace(ChunkMesh* mesh, const glm::vec3& position, BlockType blockType, int faceIndex);
 
     private:
         static glm::vec3 GetBlockColor(BlockType type);

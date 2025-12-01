@@ -12,6 +12,8 @@
 
 namespace MinecraftClone
 {
+    class CharacterController;
+
     class Camera
     {
     public:
@@ -19,6 +21,8 @@ namespace MinecraftClone
         ~Camera() = default;
 
         void Update(float deltaTime);
+        void SetCharacterController(CharacterController* controller) { m_characterController = controller; }
+        CharacterController* GetCharacterController() const { return m_characterController; }
 
         // Getters
         glm::mat4 GetViewMatrix() const;
@@ -67,6 +71,9 @@ namespace MinecraftClone
         float m_farPlane;
 
         glm::mat4 m_projectionMatrix;
+
+        // Physics integration
+        CharacterController* m_characterController = nullptr;
     };
 }
 

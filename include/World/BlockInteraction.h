@@ -17,6 +17,7 @@
 namespace MinecraftClone
 {
     class NetworkManager;  // Forward declaration
+    class PhysicsManager;  // Forward declaration
 
     class BlockInteraction
     {
@@ -26,6 +27,7 @@ namespace MinecraftClone
 
         void Initialize(World* world, ChunkRenderer* chunkRenderer, ChunkManager* chunkManager);
         void SetNetworkManager(NetworkManager* networkManager) { m_networkManager = networkManager; }
+        void SetPhysicsManager(PhysicsManager* physicsManager) { m_physicsManager = physicsManager; }
         void Update(Camera* camera, float reachDistance = 5.0f);
 
         // Block interaction
@@ -46,6 +48,7 @@ namespace MinecraftClone
         ChunkRenderer* m_chunkRenderer;
         ChunkManager* m_chunkManager;
         NetworkManager* m_networkManager;
+        PhysicsManager* m_physicsManager;
 
         RaycastResult m_lastRaycastResult;
         BlockType m_selectedBlockType;

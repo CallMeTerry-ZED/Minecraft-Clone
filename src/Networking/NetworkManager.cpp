@@ -250,7 +250,7 @@ namespace MinecraftClone
 
                             BlockType type = static_cast<BlockType>(blockMsg->blockType);
 
-                            spdlog::debug("Server received block update: ({}, {}, {}) type={} place={}",
+                            spdlog::info("Server received block update: ({}, {}, {}) type={} place={}",
                                           blockMsg->blockX, blockMsg->blockY, blockMsg->blockZ,
                                           blockMsg->blockType, blockMsg->isPlacement);
 
@@ -322,7 +322,7 @@ namespace MinecraftClone
                             m_remotePlayers[posMsg->playerId] = rp;
                         }
 
-                        spdlog::debug("Received player position: id={} pos=({}, {}, {})",
+                        spdlog::info("Received player position: id={} pos=({}, {}, {})",
                                       posMsg->playerId, posMsg->posX, posMsg->posY, posMsg->posZ);
                         break;
                     }
@@ -332,7 +332,7 @@ namespace MinecraftClone
 
                         BlockType type = static_cast<BlockType>(blockMsg->blockType);
 
-                        spdlog::debug("Received block update: ({}, {}, {}) type={} place={}",
+                        spdlog::info("Received block update: ({}, {}, {}) type={} place={}",
                                       blockMsg->blockX, blockMsg->blockY, blockMsg->blockZ,
                                       blockMsg->blockType, blockMsg->isPlacement);
 
@@ -427,7 +427,7 @@ namespace MinecraftClone
         {
             // Server/host: world has already been updated locally by BlockInteraction.
             // Just broadcast to all connected clients so they mirror the change.
-            spdlog::debug("Server broadcasting block update: ({}, {}, {}) type={} place={}",
+            spdlog::info("Server broadcasting block update: ({}, {}, {}) type={} place={}",
                           x, y, z, static_cast<int>(type), isPlacement);
 
             const int MAX_PLAYERS = 64;
@@ -663,7 +663,7 @@ namespace MinecraftClone
         }
 
         sentChunks.insert(chunkKey);
-        spdlog::debug("Queued chunk ({}, {}) for client {} (16 slices)", chunkX, chunkZ, clientIndex);
+        spdlog::info("Queued chunk ({}, {}) for client {} (16 slices)", chunkX, chunkZ, clientIndex);
     }
 
     void NetworkManager::SendChunksAroundPosition(int clientIndex, const glm::vec3& position, int radius)

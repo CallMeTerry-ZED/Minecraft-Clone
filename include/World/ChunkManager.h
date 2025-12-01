@@ -16,6 +16,8 @@
 
 namespace MinecraftClone
 {
+    class PhysicsManager;
+
     class ChunkManager
     {
     public:
@@ -23,7 +25,8 @@ namespace MinecraftClone
         ~ChunkManager() = default;
 
         void Initialize(World* world, TerrainGenerator* terrainGenerator, ChunkRenderer* chunkRenderer);
-        void Update(const glm::vec3& playerPosition);
+        void SetPhysicsManager(PhysicsManager* physicsManager) { m_physicsManager = physicsManager; }
+        void Update(const glm::vec3& playerPosition, float deltaTime);
         void Shutdown();
 
         // Settings
@@ -38,6 +41,7 @@ namespace MinecraftClone
 
     private:
         void UpdateChunks(const glm::vec3& playerPosition);
+        void ProcessChunkQueue();  // Load queued chunks gradually
         void LoadChunk(int chunkX, int chunkZ);
         void UnloadChunk(int chunkX, int chunkZ);
         bool ShouldLoadChunk(int chunkX, int chunkZ, int centerChunkX, int centerChunkZ) const;
@@ -47,14 +51,21 @@ namespace MinecraftClone
         World* m_world;
         TerrainGenerator* m_terrainGenerator;
         ChunkRenderer* m_chunkRenderer;
+        PhysicsManager* m_physicsManager;
 
         std::set<std::pair<int, int>> m_loadedChunks;  // Chunks that are currently loaded
+        std::set<std::pair<int, int>> m_chunksToLoad;  // Chunks queued for loading
         std::pair<int, int> m_currentChunk;  // Current chunk player is in
         std::pair<int, int> m_lastUpdateChunk;  // Last chunk we updated for
 
         int m_renderDistance;  // Chunks to render (load distance)
         int m_loadDistance;    // Chunks to keep loaded (unload distance)
         bool m_initialized;
+        
+        // Throttling
+        float m_lastUpdateTime;
+        static constexpr float UPDATE_INTERVAL = 0.1f;  // Update chunks every 100ms
+        static constexpr int MAX_CHUNKS_PER_FRAME = 4;  // Load max 4 chunks per frame (increased for better performance)
     };
 }
 

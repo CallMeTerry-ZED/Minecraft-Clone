@@ -11,6 +11,8 @@
 #include "Rendering/ChunkMesh.h"
 #include "Rendering/Shader.h"
 #include "World/World.h"
+#include "Rendering/Texture.h"
+#include "Rendering/BlockTextureRegistry.h"
 #include <unordered_map>
 #include <memory>
 
@@ -33,6 +35,9 @@ namespace MinecraftClone
     private:
         std::unique_ptr<Shader> m_shader;
         std::unordered_map<std::pair<int, int>, std::unique_ptr<ChunkMesh>, ChunkCoordHash> m_chunkMeshes;
+        std::unordered_map<std::string, std::unique_ptr<Texture>> m_textures;
+        GLuint m_textureArrayID;
+        std::unordered_map<uint32_t, GLuint> m_textureIndices; // Maps block+face to texture array layer
     };
 }
 

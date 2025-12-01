@@ -20,6 +20,8 @@
 #include "World/BlockInteraction.h"
 #include "Networking/NetworkManager.h"
 #include "Rendering/RemotePlayerRenderer.h"
+#include "Physics/PhysicsManager.h"
+#include "Physics/CharacterController.h"
 
 // ImGui includes
 #include <imgui.h>
@@ -154,6 +156,17 @@ namespace MinecraftClone
         // Initialize block registry
         BlockRegistry::Initialize();
 
+        // Initialize physics manager
+        spdlog::info("About to create PhysicsManager...");
+        m_physicsManager = std::make_unique<PhysicsManager>();
+        spdlog::info("PhysicsManager created, about to initialize...");
+        if (!m_physicsManager->Initialize())
+        {
+            spdlog::error("Failed to initialize physics manager!");
+            return false;
+        }
+        spdlog::info("PhysicsManager initialization complete");
+
         // Initialize world
         m_world = std::make_unique<World>();
 
@@ -179,11 +192,16 @@ namespace MinecraftClone
         // Initialize camera
         m_camera = std::make_unique<Camera>();
         m_camera->SetAspectRatio(static_cast<float>(m_windowWidth) / static_cast<float>(m_windowHeight));
-        m_camera->SetPosition(glm::vec3(0.0f, 100.0f, 0.0f)); // Start high above the world
+        glm::vec3 startPos(0.0f, 100.0f, 0.0f);
+        m_camera->SetPosition(startPos); // Start high above the world
+
+        // Don't create character controller yet - wait until terrain is loaded
+        // This prevents the player from falling through the world
 
         // Initialize chunk manager
         m_chunkManager = std::make_unique<ChunkManager>();
         m_chunkManager->Initialize(m_world.get(), m_terrainGenerator.get(), m_chunkRenderer.get());
+        m_chunkManager->SetPhysicsManager(m_physicsManager.get());
         m_chunkManager->SetRenderDistance(8);  // 8 chunks render distance
 
         // Initialize block interaction
@@ -218,6 +236,20 @@ namespace MinecraftClone
 
         // Set network manager in block interaction (so local edits can send updates)
         m_blockInteraction->SetNetworkManager(m_networkManager.get());
+        // Set physics manager in block interaction (so block changes update physics)
+        m_blockInteraction->SetPhysicsManager(m_physicsManager.get());
+
+        // Create character controller after terrain is generated (only if terrain was generated)
+        bool terrainGenerated = (!m_networkManager || m_networkManager->IsServerRunning());
+        if (terrainGenerated && m_physicsManager)
+        {
+            // Terrain was generated, create character controller
+            glm::vec3 spawnPos(0.0f, 100.0f, 0.0f);
+            CharacterController* character = m_physicsManager->CreateCharacterController(spawnPos);
+            m_camera->SetCharacterController(character);
+            spdlog::info("Character controller created at spawn position");
+        }
+        // In client mode without terrain, camera will work without physics until terrain arrives
 
         // Networking is ready but not started by default
         // Press F1 to start server, F2 to connect as client
@@ -296,6 +328,12 @@ namespace MinecraftClone
     {
         (void)deltaTime; // Suppress unused parameter warning
 
+        // Update physics (only if character controller exists)
+        if (m_physicsManager && m_camera && m_camera->GetCharacterController())
+        {
+            m_physicsManager->Update(deltaTime);
+        }
+
         // Update network manager
         if (m_networkManager)
         {
@@ -322,7 +360,7 @@ namespace MinecraftClone
             // Update chunk manager with player position
             if (m_chunkManager)
             {
-                m_chunkManager->Update(m_camera->GetPosition());
+                m_chunkManager->Update(m_camera->GetPosition(), deltaTime);
             }
 
             // Update block interaction (raycast)
@@ -455,10 +493,28 @@ namespace MinecraftClone
                 {
                     if (!m_networkManager->IsServerRunning())
                     {
-                        if (m_networkManager->StartServer("127.0.0.1", 40000))
+                    if (m_networkManager->StartServer("127.0.0.1", 40000))
+                    {
+                        spdlog::info("Server started via ImGui");
+                        // Generate terrain now that server is running
+                        spdlog::info("Generating terrain after server start (ImGui)...");
+                        GenerateTerrainWorld();
+                        // Create character controller now that terrain exists
+                        if (m_physicsManager && m_camera && !m_camera->GetCharacterController())
                         {
-                            spdlog::info("Server started via ImGui");
+                            glm::vec3 spawnPos(0.0f, 100.0f, 0.0f);
+                            spdlog::info("Creating character controller at position ({}, {}, {})", spawnPos.x, spawnPos.y, spawnPos.z);
+                            CharacterController* character = m_physicsManager->CreateCharacterController(spawnPos);
+                            m_camera->SetCharacterController(character);
+                            spdlog::info("Character controller created after server start (ImGui)");
                         }
+                        else
+                        {
+                            if (!m_physicsManager) spdlog::warn("Cannot create character controller: physics manager is null");
+                            if (!m_camera) spdlog::warn("Cannot create character controller: camera is null");
+                            if (m_camera && m_camera->GetCharacterController()) spdlog::warn("Character controller already exists");
+                        }
+                    }
                     }
                 }
 
@@ -482,10 +538,28 @@ namespace MinecraftClone
                     if (m_networkManager->IsServerRunning())
                     {
                         m_networkManager->StopServer();
+                        // Remove character controller when server stops
+                        if (m_camera && m_camera->GetCharacterController())
+                        {
+                            m_camera->SetCharacterController(nullptr);
+                        }
+                        if (m_physicsManager)
+                        {
+                            m_physicsManager->RemoveCharacterController();
+                        }
                     }
                     else if (m_networkManager->IsConnected())
                     {
                         m_networkManager->Disconnect();
+                        // Remove character controller when client disconnects
+                        if (m_camera && m_camera->GetCharacterController())
+                        {
+                            m_camera->SetCharacterController(nullptr);
+                        }
+                        if (m_physicsManager)
+                        {
+                            m_physicsManager->RemoveCharacterController();
+                        }
                     }
                 }
 
@@ -574,6 +648,12 @@ namespace MinecraftClone
             m_chunkManager.reset();
         }
 
+        if (m_physicsManager)
+        {
+            m_physicsManager->Shutdown();
+            m_physicsManager.reset();
+        }
+
         if (m_remotePlayerRenderer)
         {
             m_remotePlayerRenderer->Shutdown();
@@ -656,6 +736,24 @@ namespace MinecraftClone
                     if (m_networkManager->StartServer("127.0.0.1", 40000))
                     {
                         spdlog::info("Server started on 127.0.0.1:40000");
+                        // Generate terrain now that server is running
+                        spdlog::info("Generating terrain after server start...");
+                        GenerateTerrainWorld();
+                        // Create character controller now that terrain exists
+                        if (m_physicsManager && m_camera && !m_camera->GetCharacterController())
+                        {
+                            glm::vec3 spawnPos(0.0f, 100.0f, 0.0f);
+                            spdlog::info("Creating character controller at position ({}, {}, {})", spawnPos.x, spawnPos.y, spawnPos.z);
+                            CharacterController* character = m_physicsManager->CreateCharacterController(spawnPos);
+                            m_camera->SetCharacterController(character);
+                            spdlog::info("Character controller created after server start");
+                        }
+                        else
+                        {
+                            if (!m_physicsManager) spdlog::warn("Cannot create character controller: physics manager is null");
+                            if (!m_camera) spdlog::warn("Cannot create character controller: camera is null");
+                            if (m_camera && m_camera->GetCharacterController()) spdlog::warn("Character controller already exists");
+                        }
                     }
                     else
                     {
@@ -695,11 +793,29 @@ namespace MinecraftClone
                     {
                         m_networkManager->StopServer();
                         spdlog::info("Server stopped");
+                        // Remove character controller when server stops
+                        if (m_camera && m_camera->GetCharacterController())
+                        {
+                            m_camera->SetCharacterController(nullptr);
+                        }
+                        if (m_physicsManager)
+                        {
+                            m_physicsManager->RemoveCharacterController();
+                        }
                     }
                     else if (m_networkManager->IsConnected())
                     {
                         m_networkManager->Disconnect();
                         spdlog::info("Disconnected from server");
+                        // Remove character controller when client disconnects
+                        if (m_camera && m_camera->GetCharacterController())
+                        {
+                            m_camera->SetCharacterController(nullptr);
+                        }
+                        if (m_physicsManager)
+                        {
+                            m_physicsManager->RemoveCharacterController();
+                        }
                     }
                 }
             }

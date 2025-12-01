@@ -5,6 +5,7 @@
 #include <spdlog/spdlog.h>
 #include "World/BlockInteraction.h"
 #include "Networking/NetworkManager.h"
+#include "Physics/PhysicsManager.h"
 
 namespace MinecraftClone
 {
@@ -13,6 +14,7 @@ namespace MinecraftClone
         , m_chunkRenderer(nullptr)
         , m_chunkManager(nullptr)
         , m_networkManager(nullptr)
+        , m_physicsManager(nullptr)
         , m_selectedBlockType(BlockType::Stone)
         , m_initialized(false)
     {
@@ -73,6 +75,17 @@ namespace MinecraftClone
         // Mark chunk for mesh update
         MarkChunkForUpdate(blockPos);
 
+        // Update physics collision
+        if (m_physicsManager)
+        {
+            auto chunkCoords = World::GetChunkCoords(blockPos.x, blockPos.z);
+            Chunk* chunk = m_world->GetChunk(chunkCoords.first, chunkCoords.second);
+            if (chunk)
+            {
+                m_physicsManager->UpdateChunkCollision(chunk, chunkCoords.first, chunkCoords.second, m_world);
+            }
+        }
+
         // Send network message if connected
         if (m_networkManager && (m_networkManager->IsConnected() || m_networkManager->IsServerRunning()))
         {
@@ -104,6 +117,17 @@ namespace MinecraftClone
 
         // Mark chunk for mesh update
         MarkChunkForUpdate(placePos);
+
+        // Update physics collision
+        if (m_physicsManager)
+        {
+            auto chunkCoords = World::GetChunkCoords(placePos.x, placePos.z);
+            Chunk* chunk = m_world->GetChunk(chunkCoords.first, chunkCoords.second);
+            if (chunk)
+            {
+                m_physicsManager->UpdateChunkCollision(chunk, chunkCoords.first, chunkCoords.second, m_world);
+            }
+        }
 
         // Send network message if connected
         if (m_networkManager && (m_networkManager->IsConnected() || m_networkManager->IsServerRunning()))

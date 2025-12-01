@@ -19,7 +19,7 @@ namespace MinecraftClone
     struct Vertex
     {
         glm::vec3 position;
-        glm::vec3 color;
+        glm::vec2 texCoord;
         glm::vec3 normal;
     };
 
@@ -30,7 +30,8 @@ namespace MinecraftClone
         ~ChunkMesh();
 
         void Clear();
-        void AddFace(const glm::vec3& position, const glm::vec3& color, const glm::vec3& normal, int faceIndex);
+        void AddFace(const glm::vec3& position, const glm::vec2& texCoord0, const glm::vec2& texCoord1,
+            const glm::vec2& texCoord2, const glm::vec2& texCoord3, const glm::vec3& normal, int faceIndex);
         void Build();
         void Render(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix, Shader* shader);
         void Shutdown();

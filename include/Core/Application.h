@@ -80,6 +80,9 @@ namespace MinecraftClone
         std::unique_ptr<class BlockInteraction> m_blockInteraction;
         std::unique_ptr<class NetworkManager> m_networkManager;
 
+        // Physics
+        std::unique_ptr<class PhysicsManager> m_physicsManager;
+
         // ImGui
         bool m_imguiInitialized = false;
 

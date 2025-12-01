@@ -24,7 +24,8 @@ namespace MinecraftClone
         m_isBuilt = false;
     }
 
-    void ChunkMesh::AddFace(const glm::vec3& position, const glm::vec3& color, const glm::vec3& normal, int faceIndex)
+    void ChunkMesh::AddFace(const glm::vec3& position, const glm::vec2& texCoord0, const glm::vec2& texCoord1,
+        const glm::vec2& texCoord2, const glm::vec2& texCoord3, const glm::vec3& normal, int faceIndex)
     {
         // Define the 4 vertices of a quad face
         // Face indices: 0=front, 1=back, 2=left, 3=right, 4=top, 5=bottom
@@ -74,10 +75,10 @@ namespace MinecraftClone
 
         unsigned int baseIndex = static_cast<unsigned int>(m_vertices.size());
 
-        m_vertices.push_back({v0, color, normal});
-        m_vertices.push_back({v1, color, normal});
-        m_vertices.push_back({v2, color, normal});
-        m_vertices.push_back({v3, color, normal});
+        m_vertices.push_back({v0, texCoord0, normal});
+        m_vertices.push_back({v1, texCoord1, normal});
+        m_vertices.push_back({v2, texCoord2, normal});
+        m_vertices.push_back({v3, texCoord3, normal});
 
         // Add indices for two triangles
         m_indices.push_back(baseIndex + 0);
@@ -116,8 +117,8 @@ namespace MinecraftClone
         glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, position));
         glEnableVertexAttribArray(0);
 
-        // Color attribute
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, color));
+        // Texture coordinate attribute
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, texCoord));
         glEnableVertexAttribArray(1);
 
         // Normal attribute

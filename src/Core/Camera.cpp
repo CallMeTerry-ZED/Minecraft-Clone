@@ -2,8 +2,10 @@
  * © 2025 ZED Interactive. All Rights Reserved.
  */
 
+#include <spdlog/spdlog.h>
 #include "Core/Camera.h"
 #include "Core/Input.h"
+#include "Physics/CharacterController.h"
 #include <GLFW/glfw3.h>
 
 namespace MinecraftClone
@@ -34,35 +36,94 @@ namespace MinecraftClone
 
     void Camera::ProcessKeyboard(float deltaTime)
     {
-        float velocity = m_movementSpeed * deltaTime;
+        if (m_characterController)
+        {
+            // Use physics-based movement
+            glm::vec3 moveDirection(0.0f, 0.0f, 0.0f);
+            static bool logged = false;
+            if (!logged)
+            {
+                spdlog::info("Camera using physics-based movement");
+                logged = true;
+            }
 
-        if (Input::IsKeyDown(GLFW_KEY_W))
-        {
-            m_position += m_front * velocity;
+            if (Input::IsKeyDown(GLFW_KEY_W))
+            {
+                moveDirection += m_front;
+            }
+            if (Input::IsKeyDown(GLFW_KEY_S))
+            {
+                moveDirection -= m_front;
+            }
+            if (Input::IsKeyDown(GLFW_KEY_A))
+            {
+                moveDirection -= m_right;
+            }
+            if (Input::IsKeyDown(GLFW_KEY_D))
+            {
+                moveDirection += m_right;
+            }
+
+            // Normalize horizontal movement (prevent faster diagonal movement)
+            if (glm::length(moveDirection) > 0.0f)
+            {
+                moveDirection.y = 0.0f; // Remove vertical component
+                moveDirection = glm::normalize(moveDirection);
+            }
+
+            m_characterController->SetMoveDirection(moveDirection);
+
+            // Jump
+            if (Input::IsKeyPressed(GLFW_KEY_SPACE))
+            {
+                m_characterController->Jump();
+            }
+
+            // Update camera position from physics body
+            glm::vec3 controllerPos = m_characterController->GetPosition();
+            // Adjust camera height (character controller is at feet, camera is at eyes)
+            controllerPos.y += m_characterController->GetHeight() * 0.9f; // Eye level
+            m_position = controllerPos;
         }
-        if (Input::IsKeyDown(GLFW_KEY_S))
+        else
         {
-            m_position -= m_front * velocity;
-        }
-        if (Input::IsKeyDown(GLFW_KEY_A))
-        {
-            m_position -= m_right * velocity;
-        }
-        if (Input::IsKeyDown(GLFW_KEY_D))
-        {
-            m_position += m_right * velocity;
-        }
-        if (Input::IsKeyDown(GLFW_KEY_SPACE))
-        {
-            m_position += m_worldUp * velocity;
-        }
-        if (Input::IsKeyDown(GLFW_KEY_LEFT_SHIFT))
-        {
-            m_position -= m_worldUp * velocity;
+            // Fallback to old movement (no physics)
+            static bool logged = false;
+            if (!logged)
+            {
+                spdlog::info("Camera using fly-cam movement (no character controller)");
+                logged = true;
+            }
+            float velocity = m_movementSpeed * deltaTime;
+
+            if (Input::IsKeyDown(GLFW_KEY_W))
+            {
+                m_position += m_front * velocity;
+            }
+            if (Input::IsKeyDown(GLFW_KEY_S))
+            {
+                m_position -= m_front * velocity;
+            }
+            if (Input::IsKeyDown(GLFW_KEY_A))
+            {
+                m_position -= m_right * velocity;
+            }
+            if (Input::IsKeyDown(GLFW_KEY_D))
+            {
+                m_position += m_right * velocity;
+            }
+            if (Input::IsKeyDown(GLFW_KEY_SPACE))
+            {
+                m_position += m_worldUp * velocity;
+            }
+            if (Input::IsKeyDown(GLFW_KEY_LEFT_SHIFT))
+            {
+                m_position -= m_worldUp * velocity;
+            }
         }
     }
 
-    void Camera::ProcessMouseMovement(float deltaTime)
+    void Camera::ProcessMouseMovement(float /*deltaTime*/)
     {
         if (!Input::IsMouseLocked())
         {
