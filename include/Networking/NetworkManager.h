@@ -44,6 +44,13 @@ namespace MinecraftClone
         }
     };
 
+    struct RemotePlayer
+    {
+        glm::vec3 position;
+        float yaw;
+        float pitch;
+    };
+
     class NetworkManager
     {
     public:
@@ -71,6 +78,8 @@ namespace MinecraftClone
         // Getters
         bool IsServer() const { return m_isServer; }
         uint32_t GetLocalPlayerId() const { return m_localPlayerId; }
+
+        const std::unordered_map<uint32_t, RemotePlayer>& GetRemotePlayers() const { return m_remotePlayers; }
 
         // World / Renderer wiring
         void SetWorld(World* world) { m_world = world; }
@@ -101,6 +110,8 @@ namespace MinecraftClone
 
         // Client
         std::unique_ptr<yojimbo::Client> m_client;
+
+        std::unordered_map<uint32_t, RemotePlayer> m_remotePlayers;  // Client-side view of other players
 
         bool m_isServer;
         uint32_t m_localPlayerId;

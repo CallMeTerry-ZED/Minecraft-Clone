@@ -19,6 +19,7 @@
 #include "World/ChunkManager.h"
 #include "World/BlockInteraction.h"
 #include "Networking/NetworkManager.h"
+#include "Rendering/RemotePlayerRenderer.h"
 
 // ImGui includes
 #include <imgui.h>
@@ -165,6 +166,13 @@ namespace MinecraftClone
         if (!m_chunkRenderer->Initialize())
         {
             spdlog::error("Failed to initialize chunk renderer!");
+            return false;
+        }
+
+        m_remotePlayerRenderer = std::make_unique<RemotePlayerRenderer>();
+        if (!m_remotePlayerRenderer->Initialize())
+        {
+            spdlog::error("Failed to initialize remote player renderer!");
             return false;
         }
 
@@ -332,6 +340,14 @@ namespace MinecraftClone
             if (m_testCube)
             {
                 m_testCube->Render(m_camera->GetViewMatrix(), m_camera->GetProjectionMatrix());
+            }
+
+            if (m_networkManager && m_remotePlayerRenderer)
+            {
+                const auto& players = m_networkManager->GetRemotePlayers();
+                m_remotePlayerRenderer->Render(players,
+                                               m_camera->GetViewMatrix(),
+                                               m_camera->GetProjectionMatrix());
             }
         }
 
@@ -548,6 +564,12 @@ namespace MinecraftClone
         {
             m_chunkManager->Shutdown();
             m_chunkManager.reset();
+        }
+
+        if (m_remotePlayerRenderer)
+        {
+            m_remotePlayerRenderer->Shutdown();
+            m_remotePlayerRenderer.reset();
         }
 
         if (m_chunkRenderer)

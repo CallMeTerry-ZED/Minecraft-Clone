@@ -175,6 +175,8 @@ add_executable(${PROJECT_NAME}
         include/Networking/NetworkManager.h
         src/Networking/NetworkMessages.cpp
         include/Networking/YojimboMessageFactory.h
+        src/Rendering/RemotePlayerRenderer.cpp
+        include/Rendering/RemotePlayerRenderer.h
 )
 
 # Include directories

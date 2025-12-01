@@ -210,8 +210,15 @@ namespace MinecraftClone
                             uint32_t playerId = posMsg->playerId;
                             glm::vec3 position(posMsg->posX, posMsg->posY, posMsg->posZ);
 
-                            // Store player position
+                            // Store player position on server
                             m_playerPositions[playerId] = position;
+
+                            // Also update remote-player map so the host can render clients
+                            RemotePlayer rp;
+                            rp.position = position;
+                            rp.yaw      = posMsg->yaw;
+                            rp.pitch    = posMsg->pitch;
+                            m_remotePlayers[playerId] = rp;
 
                             // Broadcast to all other clients
                             BroadcastPlayerPosition(playerId, position, posMsg->yaw, posMsg->pitch);
@@ -283,9 +290,20 @@ namespace MinecraftClone
                     case (int)GameMessageType::PLAYER_POSITION:
                     {
                         PlayerPositionMessage* posMsg = (PlayerPositionMessage*)message;
-                        // Handle other player positions
+
+                        // Ignore our own echo (if any)
+                        if (posMsg->playerId != m_localPlayerId)
+                        {
+                            RemotePlayer rp;
+                            rp.position = glm::vec3(posMsg->posX, posMsg->posY, posMsg->posZ);
+                            rp.yaw      = posMsg->yaw;
+                            rp.pitch    = posMsg->pitch;
+
+                            m_remotePlayers[posMsg->playerId] = rp;
+                        }
+
                         spdlog::debug("Received player position: id={} pos=({}, {}, {})",
-                                     posMsg->playerId, posMsg->posX, posMsg->posY, posMsg->posZ);
+                                      posMsg->playerId, posMsg->posX, posMsg->posY, posMsg->posZ);
                         break;
                     }
                     case (int)GameMessageType::BLOCK_UPDATE:
@@ -339,20 +357,43 @@ namespace MinecraftClone
 
     void NetworkManager::SendBlockUpdate(int x, int y, int z, BlockType type, bool isPlacement)
     {
-        if (m_isServer)
+        if (m_isServer && m_server)
         {
-            // Server would broadcast to all clients
-            spdlog::debug("Server block update: ({}, {}, {})", x, y, z);
+            // Server/host: world has already been updated locally by BlockInteraction.
+            // Just broadcast to all connected clients so they mirror the change.
+            spdlog::debug("Server broadcasting block update: ({}, {}, {}) type={} place={}",
+                          x, y, z, static_cast<int>(type), isPlacement);
+
+            const int MAX_PLAYERS = 64;
+            for (int clientIndex = 0; clientIndex < MAX_PLAYERS; ++clientIndex)
+            {
+                if (!m_server->IsClientConnected(clientIndex))
+                    continue;
+
+                BlockUpdateMessage* outMsg =
+                    (BlockUpdateMessage*)m_server->CreateMessage(clientIndex, (int)GameMessageType::BLOCK_UPDATE);
+                if (!outMsg)
+                    continue;
+
+                outMsg->blockX      = x;
+                outMsg->blockY      = y;
+                outMsg->blockZ      = z;
+                outMsg->blockType   = static_cast<uint8_t>(type);
+                outMsg->isPlacement = isPlacement;
+
+                m_server->SendMessage(clientIndex, (int)GameChannel::RELIABLE, outMsg);
+            }
         }
         else if (m_client && m_client->IsConnected())
         {
-            BlockUpdateMessage* message = (BlockUpdateMessage*)m_client->CreateMessage((int)GameMessageType::BLOCK_UPDATE);
+            BlockUpdateMessage* message =
+                (BlockUpdateMessage*)m_client->CreateMessage((int)GameMessageType::BLOCK_UPDATE);
             if (message)
             {
-                message->blockX = x;
-                message->blockY = y;
-                message->blockZ = z;
-                message->blockType = static_cast<uint8_t>(type);
+                message->blockX      = x;
+                message->blockY      = y;
+                message->blockZ      = z;
+                message->blockType   = static_cast<uint8_t>(type);
                 message->isPlacement = isPlacement;
 
                 m_client->SendMessage((int)GameChannel::RELIABLE, message);

@@ -18,6 +18,7 @@ namespace MinecraftClone
 {
     class Event;
     class EventDispatcher;
+    class RemotePlayerRenderer;
 
     class Application
     {
@@ -70,6 +71,7 @@ namespace MinecraftClone
         // Rendering
         std::unique_ptr<class TestCube> m_testCube;
         std::unique_ptr<class ChunkRenderer> m_chunkRenderer;
+        std::unique_ptr<RemotePlayerRenderer> m_remotePlayerRenderer;
 
         // World
         std::unique_ptr<class World> m_world;
