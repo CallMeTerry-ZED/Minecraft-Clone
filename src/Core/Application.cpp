@@ -196,7 +196,11 @@ namespace MinecraftClone
         // Initialize network manager
         m_networkManager = std::make_unique<NetworkManager>();
 
-        // Set network manager in block interaction
+        // Wire world / renderer into network manager so it can apply block updates
+        m_networkManager->SetWorld(m_world.get());
+        m_networkManager->SetChunkRenderer(m_chunkRenderer.get());
+
+        // Set network manager in block interaction (so local edits can send updates)
         m_blockInteraction->SetNetworkManager(m_networkManager.get());
 
         // Networking is ready but not started by default

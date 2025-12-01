@@ -7,6 +7,11 @@
 
 // Now include NetworkManager.h (which includes NetworkMessages.h which includes yojimbo.h)
 #include "Networking/NetworkManager.h"
+#include "World/World.h"
+#include "World/Chunk.h"
+#include "World/ChunkRenderer.h"
+
+#include <glm/gtc/type_ptr.hpp>
 #include <cstring>
 #include <random>
 
@@ -215,11 +220,41 @@ namespace MinecraftClone
                         case (int)GameMessageType::BLOCK_UPDATE:
                         {
                             BlockUpdateMessage* blockMsg = (BlockUpdateMessage*)message;
-                            // Server would validate and broadcast block updates
-                            // For now, just log it
+
+                            BlockType type = static_cast<BlockType>(blockMsg->blockType);
+
                             spdlog::debug("Server received block update: ({}, {}, {}) type={} place={}",
-                                         blockMsg->blockX, blockMsg->blockY, blockMsg->blockZ,
-                                         blockMsg->blockType, blockMsg->isPlacement);
+                                          blockMsg->blockX, blockMsg->blockY, blockMsg->blockZ,
+                                          blockMsg->blockType, blockMsg->isPlacement);
+
+                            // Apply to server world
+                            ApplyBlockUpdateInternal(blockMsg->blockX,
+                                                     blockMsg->blockY,
+                                                     blockMsg->blockZ,
+                                                     type,
+                                                     blockMsg->isPlacement);
+
+                            // Broadcast to all connected clients
+                            const int MAX_PLAYERS = 64;
+                            for (int clientIndex = 0; clientIndex < MAX_PLAYERS; ++clientIndex)
+                            {
+                                if (!m_server->IsClientConnected(clientIndex))
+                                    continue;
+
+                                BlockUpdateMessage* outMsg =
+                                    (BlockUpdateMessage*)m_server->CreateMessage(clientIndex, (int)GameMessageType::BLOCK_UPDATE);
+                                if (!outMsg)
+                                    continue;
+
+                                outMsg->blockX      = blockMsg->blockX;
+                                outMsg->blockY      = blockMsg->blockY;
+                                outMsg->blockZ      = blockMsg->blockZ;
+                                outMsg->blockType   = blockMsg->blockType;
+                                outMsg->isPlacement = blockMsg->isPlacement;
+
+                                m_server->SendMessage(clientIndex, (int)GameChannel::RELIABLE, outMsg);
+                            }
+
                             break;
                         }
                     }
@@ -256,10 +291,18 @@ namespace MinecraftClone
                     case (int)GameMessageType::BLOCK_UPDATE:
                     {
                         BlockUpdateMessage* blockMsg = (BlockUpdateMessage*)message;
-                        // Handle block updates from server
+
+                        BlockType type = static_cast<BlockType>(blockMsg->blockType);
+
                         spdlog::debug("Received block update: ({}, {}, {}) type={} place={}",
-                                     blockMsg->blockX, blockMsg->blockY, blockMsg->blockZ,
-                                     blockMsg->blockType, blockMsg->isPlacement);
+                                      blockMsg->blockX, blockMsg->blockY, blockMsg->blockZ,
+                                      blockMsg->blockType, blockMsg->isPlacement);
+
+                        ApplyBlockUpdateInternal(blockMsg->blockX,
+                                                 blockMsg->blockY,
+                                                 blockMsg->blockZ,
+                                                 type,
+                                                 blockMsg->isPlacement);
                         break;
                     }
                 }
@@ -346,6 +389,61 @@ namespace MinecraftClone
                 message->pitch = pitch;
 
                 m_server->SendMessage(i, (int)GameChannel::UNRELIABLE, message);
+            }
+        }
+    }
+
+    void NetworkManager::ApplyBlockUpdateInternal(int x, int y, int z, BlockType type, bool isPlacement)
+    {
+        if (!m_world || !m_chunkRenderer)
+        {
+            spdlog::warn("NetworkManager::ApplyBlockUpdateInternal called without world/renderer wired");
+            return;
+        }
+
+        // Apply to world
+        if (isPlacement)
+        {
+            m_world->SetBlock(x, y, z, type);
+        }
+        else
+        {
+            m_world->SetBlock(x, y, z, BlockType::Air);
+        }
+
+        // Figure out which chunk this block belongs to
+        auto chunkCoords = World::GetChunkCoords(x, z);
+        Chunk* chunk = m_world->GetChunk(chunkCoords.first, chunkCoords.second);
+        if (!chunk)
+        {
+            return;
+        }
+
+        // Update this chunk's mesh
+        m_chunkRenderer->UpdateChunk(chunk, chunkCoords.first, chunkCoords.second, m_world);
+
+        // Optionally: also update adjacent chunks if on a border (same logic as BlockInteraction::MarkChunkForUpdate)
+        glm::ivec3 local = World::GetLocalCoords(x, y, z);
+
+        struct Offset { int dx, dz; };
+        std::vector<Offset> neighborOffsets;
+
+        const int kChunkSizeX = CHUNK_SIZE_X;
+        const int kChunkSizeZ = CHUNK_SIZE_Z;
+
+        if (local.x == 0)                   neighborOffsets.push_back({ -1,  0 });
+        if (local.x == kChunkSizeX - 1)     neighborOffsets.push_back({  1,  0 });
+        if (local.z == 0)                   neighborOffsets.push_back({  0, -1 });
+        if (local.z == kChunkSizeZ - 1)     neighborOffsets.push_back({  0,  1 });
+
+        for (const auto& o : neighborOffsets)
+        {
+            int adjChunkX = chunkCoords.first  + o.dx;
+            int adjChunkZ = chunkCoords.second + o.dz;
+            Chunk* adjChunk = m_world->GetChunk(adjChunkX, adjChunkZ);
+            if (adjChunk)
+            {
+                m_chunkRenderer->UpdateChunk(adjChunk, adjChunkX, adjChunkZ, m_world);
             }
         }
     }

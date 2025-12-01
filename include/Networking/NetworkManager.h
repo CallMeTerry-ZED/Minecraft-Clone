@@ -17,6 +17,8 @@
 
 namespace MinecraftClone
 {
+    class ChunkRenderer; // forward declaration
+
     // Connection configuration
     struct GameConnectionConfig : public yojimbo::ClientServerConfig
     {
@@ -70,6 +72,10 @@ namespace MinecraftClone
         bool IsServer() const { return m_isServer; }
         uint32_t GetLocalPlayerId() const { return m_localPlayerId; }
 
+        // World / Renderer wiring
+        void SetWorld(World* world) { m_world = world; }
+        void SetChunkRenderer(ChunkRenderer* renderer) { m_chunkRenderer = renderer; }
+
     private:
         // Server
         void UpdateServer(double time, float deltaTime);
@@ -79,6 +85,9 @@ namespace MinecraftClone
         // Client
         void UpdateClient(double time, float deltaTime);
         void ProcessClientMessages();
+
+        // Shared block-application helper
+        void ApplyBlockUpdateInternal(int x, int y, int z, BlockType type, bool isPlacement);
 
         // Private key for insecure connections (development only)
         static const uint8_t DEFAULT_PRIVATE_KEY[32];
@@ -96,6 +105,10 @@ namespace MinecraftClone
         bool m_isServer;
         uint32_t m_localPlayerId;
         double m_time;
+
+        // Non-owning pointers into game state
+        World* m_world = nullptr;
+        ChunkRenderer* m_chunkRenderer = nullptr;
     };
 }
 
