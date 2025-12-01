@@ -85,6 +85,8 @@ namespace MinecraftClone
             m_server.reset();
             m_isServer = false;
             m_playerPositions.clear();
+            m_clientChunksSent.clear();
+            m_clientChunkQueue.clear();  // Clear queues
             spdlog::info("Server stopped");
         }
     }
@@ -153,7 +155,7 @@ namespace MinecraftClone
 
     void NetworkManager::UpdateServer(double time, float deltaTime)
     {
-        (void)deltaTime; // Suppress unused parameter warning
+        (void)deltaTime;
 
         if (!m_server->IsRunning())
         {
@@ -162,6 +164,24 @@ namespace MinecraftClone
 
         m_server->AdvanceTime(time);
         m_server->ReceivePackets();
+
+        // Check for new client connections
+        const int MAX_PLAYERS = 64;
+        for (int i = 0; i < MAX_PLAYERS; i++)
+        {
+            if (m_server->IsClientConnected(i))
+            {
+                // Check if this is a new client (not in our tracking map)
+                if (m_clientChunksSent.find(i) == m_clientChunksSent.end())
+                {
+                    OnClientConnected(i);
+                }
+
+                // Process chunk queue for this client
+                ProcessChunkQueue(i);
+            }
+        }
+
         ProcessServerMessages();
         m_server->SendPackets();
     }
@@ -321,6 +341,52 @@ namespace MinecraftClone
                                                  blockMsg->blockZ,
                                                  type,
                                                  blockMsg->isPlacement);
+                        break;
+                    }
+                    case (int)GameMessageType::CHUNK_DATA:
+                    {
+                        ChunkSliceMessage* sliceMsg = (ChunkSliceMessage*)message;
+
+                        if (!m_world || !m_chunkRenderer)
+                        {
+                            spdlog::warn("Received CHUNK_DATA but world/renderer not wired!");
+                            break;
+                        }
+
+                        spdlog::info("Received chunk slice: ({}, {}) sliceY={}",
+                                     sliceMsg->chunkX, sliceMsg->chunkZ, sliceMsg->sliceY);
+
+                        // Get or create chunk
+                        Chunk* chunk = m_world->GetOrCreateChunk(sliceMsg->chunkX, sliceMsg->chunkZ);
+
+                        // Apply this slice's block data
+                        int yStart = sliceMsg->sliceY * 16;
+                        for (int y = 0; y < 16; y++)
+                        {
+                            int worldY = yStart + y;
+                            for (int z = 0; z < CHUNK_SIZE_Z; z++)
+                            {
+                                for (int x = 0; x < CHUNK_SIZE_X; x++)
+                                {
+                                    int index = y * (CHUNK_SIZE_X * CHUNK_SIZE_Z) + z * CHUNK_SIZE_X + x;
+                                    BlockType type = static_cast<BlockType>(sliceMsg->blockData[index]);
+                                    chunk->SetBlock(x, worldY, z, type);
+                                }
+                            }
+                        }
+
+                        // Track received slices
+                        auto chunkKey = std::make_pair(sliceMsg->chunkX, sliceMsg->chunkZ);
+                        m_clientChunkSlicesReceived[chunkKey].set(sliceMsg->sliceY, true);
+
+                        // If all 16 slices received, update mesh
+                        if (m_clientChunkSlicesReceived[chunkKey].all())
+                        {
+                            m_chunkRenderer->UpdateChunk(chunk, sliceMsg->chunkX, sliceMsg->chunkZ, m_world);
+                            m_clientChunkSlicesReceived.erase(chunkKey);  // Clean up
+                            spdlog::info("Completed chunk ({}, {}) - mesh updated", sliceMsg->chunkX, sliceMsg->chunkZ);
+                        }
+
                         break;
                     }
                 }
@@ -487,5 +553,142 @@ namespace MinecraftClone
                 m_chunkRenderer->UpdateChunk(adjChunk, adjChunkX, adjChunkZ, m_world);
             }
         }
+    }
+
+    void NetworkManager::ProcessChunkQueue(int clientIndex)
+    {
+        if (!m_server || !m_server->IsClientConnected(clientIndex) || !m_world)
+        {
+            return;
+        }
+
+        auto& queue = m_clientChunkQueue[clientIndex];
+        if (queue.empty())
+        {
+            return;
+        }
+
+        // Send up to 4 slices per frame to avoid flooding the channel
+        const int MAX_SLICES_PER_FRAME = 4;
+        int sent = 0;
+
+        while (!queue.empty() && sent < MAX_SLICES_PER_FRAME)
+        {
+            PendingChunkSlice pending = queue.front();
+            queue.pop();
+
+            Chunk* chunk = m_world->GetChunk(pending.chunkX, pending.chunkZ);
+            if (!chunk)
+            {
+                continue;  // Chunk doesn't exist, skip
+            }
+
+            ChunkSliceMessage* msg = (ChunkSliceMessage*)m_server->CreateMessage(clientIndex, (int)GameMessageType::CHUNK_DATA);
+            if (!msg)
+            {
+                // Channel might be full, put back and try next frame
+                queue.push(pending);
+                break;
+            }
+
+            msg->chunkX = pending.chunkX;
+            msg->chunkZ = pending.chunkZ;
+            msg->sliceY = pending.sliceY;
+
+            // Copy this slice's block data
+            int yStart = pending.sliceY * 16;
+            for (int y = 0; y < 16; y++)
+            {
+                int worldY = yStart + y;
+                for (int z = 0; z < CHUNK_SIZE_Z; z++)
+                {
+                    for (int x = 0; x < CHUNK_SIZE_X; x++)
+                    {
+                        const Block& block = chunk->GetBlock(x, worldY, z);
+                        int index = y * (CHUNK_SIZE_X * CHUNK_SIZE_Z) + z * CHUNK_SIZE_X + x;
+                        msg->blockData[index] = static_cast<uint8_t>(block.GetType());
+                    }
+                }
+            }
+
+            if (!m_server->CanSendMessage(clientIndex, (int)GameChannel::RELIABLE))
+            {
+                // Channel full, put back and try next frame
+                m_server->ReleaseMessage(clientIndex, msg);
+                queue.push(pending);
+                break;
+            }
+
+            m_server->SendMessage(clientIndex, (int)GameChannel::RELIABLE, msg);
+            sent++;
+        }
+
+        if (sent > 0)
+        {
+            spdlog::info("Sent {} chunk slices to client {} ({} remaining in queue)",
+                         sent, clientIndex, static_cast<int>(queue.size()));
+        }
+    }
+
+    void NetworkManager::SendChunkToClient(int clientIndex, int chunkX, int chunkZ)
+    {
+        if (!m_server || !m_server->IsClientConnected(clientIndex) || !m_world)
+        {
+            return;
+        }
+
+        // Check if we already sent this chunk
+        auto& sentChunks = m_clientChunksSent[clientIndex];
+        auto chunkKey = std::make_pair(chunkX, chunkZ);
+        if (sentChunks.find(chunkKey) != sentChunks.end())
+        {
+            return;  // Already sent
+        }
+
+        Chunk* chunk = m_world->GetChunk(chunkX, chunkZ);
+        if (!chunk)
+        {
+            return;
+        }
+
+        // Queue all 16 slices instead of sending immediately
+        auto& queue = m_clientChunkQueue[clientIndex];
+        for (uint8_t sliceY = 0; sliceY < 16; sliceY++)
+        {
+            PendingChunkSlice pending;
+            pending.chunkX = chunkX;
+            pending.chunkZ = chunkZ;
+            pending.sliceY = sliceY;
+            queue.push(pending);
+        }
+
+        sentChunks.insert(chunkKey);
+        spdlog::debug("Queued chunk ({}, {}) for client {} (16 slices)", chunkX, chunkZ, clientIndex);
+    }
+
+    void NetworkManager::SendChunksAroundPosition(int clientIndex, const glm::vec3& position, int radius)
+    {
+        auto chunkCoords = World::GetChunkCoords(static_cast<int>(position.x), static_cast<int>(position.z));
+        int centerChunkX = chunkCoords.first;
+        int centerChunkZ = chunkCoords.second;
+
+        for (int dx = -radius; dx <= radius; dx++)
+        {
+            for (int dz = -radius; dz <= radius; dz++)
+            {
+                int chunkX = centerChunkX + dx;
+                int chunkZ = centerChunkZ + dz;
+                SendChunkToClient(clientIndex, chunkX, chunkZ);
+            }
+        }
+    }
+
+    void NetworkManager::OnClientConnected(int clientIndex)
+    {
+        spdlog::info("Client {} connected, sending initial chunks", clientIndex);
+
+        // Send chunks around spawn (0, 0, 100)
+        glm::vec3 spawnPos(0.0f, 100.0f, 0.0f);
+        SendChunksAroundPosition(clientIndex, spawnPos, 5);  // 5 chunk radius
     }
 }

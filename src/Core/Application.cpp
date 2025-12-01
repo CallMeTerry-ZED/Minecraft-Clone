@@ -191,9 +191,6 @@ namespace MinecraftClone
         m_blockInteraction->Initialize(m_world.get(), m_chunkRenderer.get(), m_chunkManager.get());
         m_blockInteraction->SetSelectedBlockType(BlockType::Stone); // Default block to place
 
-        // Generate initial terrain around spawn
-        GenerateTerrainWorld();
-
         // Initialize yojimbo
         if (!InitializeYojimbo())
         {
@@ -203,6 +200,17 @@ namespace MinecraftClone
 
         // Initialize network manager
         m_networkManager = std::make_unique<NetworkManager>();
+
+        // Generate initial terrain around spawn
+        // Only generate on server - clients will receive chunks from server
+        if (!m_networkManager || m_networkManager->IsServerRunning())
+        {
+            GenerateTerrainWorld();
+        }
+        else
+        {
+            spdlog::info("Client mode: Will receive terrain from server");
+        }
 
         // Wire world / renderer into network manager so it can apply block updates
         m_networkManager->SetWorld(m_world.get());
@@ -847,6 +855,13 @@ namespace MinecraftClone
 
     void Application::GenerateTerrainWorld()
     {
+        // Only generate terrain on server
+        if (m_networkManager && !m_networkManager->IsServerRunning())
+        {
+            spdlog::info("Client: Waiting for chunk data from server instead of generating terrain");
+            return;
+        }
+
         spdlog::info("Generating initial terrain...");
 
         // Generate initial chunks around spawn (0, 0)

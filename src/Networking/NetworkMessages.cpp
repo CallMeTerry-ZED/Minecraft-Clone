@@ -20,4 +20,8 @@ namespace MinecraftClone
     template bool PlayerJoinedMessage::Serialize<yojimbo::ReadStream>(yojimbo::ReadStream&);
     template bool PlayerJoinedMessage::Serialize<yojimbo::WriteStream>(yojimbo::WriteStream&);
     template bool PlayerJoinedMessage::Serialize<yojimbo::MeasureStream>(yojimbo::MeasureStream&);
+
+    template bool ChunkSliceMessage::Serialize<yojimbo::ReadStream>(yojimbo::ReadStream&);
+    template bool ChunkSliceMessage::Serialize<yojimbo::WriteStream>(yojimbo::WriteStream&);
+    template bool ChunkSliceMessage::Serialize<yojimbo::MeasureStream>(yojimbo::MeasureStream&);
 }

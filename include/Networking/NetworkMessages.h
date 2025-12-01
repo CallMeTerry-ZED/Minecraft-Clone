@@ -11,8 +11,10 @@
 // NOTE: Any .cpp file that includes this header MUST include <spdlog/spdlog.h> FIRST
 #include <yojimbo.h>
 #include "World/BlockType.h"
+#include "World/Chunk.h"
 #include <glm/glm.hpp>
 #include <cstdint>
+#include <cstring>
 
 namespace MinecraftClone
 {
@@ -120,11 +122,40 @@ namespace MinecraftClone
         YOJIMBO_VIRTUAL_SERIALIZE_FUNCTIONS();
     };
 
+    // Chunk slice message (reliable) - sends one Y-layer slice of a chunk
+    // A full chunk is split into 16 slices (one per 16-block Y layer)
+    class ChunkSliceMessage : public yojimbo::Message
+    {
+    public:
+        int32_t chunkX, chunkZ;
+        uint8_t sliceY;  // Which Y slice (0-15, each slice is 16 blocks tall)
+        uint8_t blockData[CHUNK_SIZE_X * CHUNK_SIZE_Z * 16];  // 16 * 16 * 16 = 4096 bytes
+
+        ChunkSliceMessage()
+            : chunkX(0), chunkZ(0), sliceY(0)
+        {
+            std::memset(blockData, static_cast<int>(BlockType::Air), sizeof(blockData));
+        }
+
+        template <typename Stream>
+        bool Serialize(Stream& stream)
+        {
+            serialize_int(stream, chunkX, -10000, 10000);
+            serialize_int(stream, chunkZ, -10000, 10000);
+            serialize_bits(stream, sliceY, 4);  // 0-15 fits in 4 bits
+            serialize_bytes(stream, blockData, sizeof(blockData));
+            return true;
+        }
+
+        YOJIMBO_VIRTUAL_SERIALIZE_FUNCTIONS();
+    };
+
     // Message factory (must be in header for YOJIMBO macros)
     YOJIMBO_MESSAGE_FACTORY_START(GameMessageFactory, (int)GameMessageType::COUNT);
     YOJIMBO_DECLARE_MESSAGE_TYPE((int)GameMessageType::PLAYER_POSITION, PlayerPositionMessage);
     YOJIMBO_DECLARE_MESSAGE_TYPE((int)GameMessageType::BLOCK_UPDATE, BlockUpdateMessage);
     YOJIMBO_DECLARE_MESSAGE_TYPE((int)GameMessageType::PLAYER_JOINED, PlayerJoinedMessage);
+    YOJIMBO_DECLARE_MESSAGE_TYPE((int)GameMessageType::CHUNK_DATA, ChunkSliceMessage);
     YOJIMBO_MESSAGE_FACTORY_FINISH();
 }
 

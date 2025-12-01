@@ -12,7 +12,10 @@
 #include "World/World.h"
 #include "Core/Camera.h"
 #include <memory>
+#include <unordered_set>
 #include <unordered_map>
+#include <bitset>
+#include <queue>
 #include <glm/glm.hpp>
 
 namespace MinecraftClone
@@ -85,11 +88,17 @@ namespace MinecraftClone
         void SetWorld(World* world) { m_world = world; }
         void SetChunkRenderer(ChunkRenderer* renderer) { m_chunkRenderer = renderer; }
 
+        // Server: Send chunks to clients
+        void SendChunkToClient(int clientIndex, int chunkX, int chunkZ);
+        void SendChunksAroundPosition(int clientIndex, const glm::vec3& position, int radius);
+
     private:
         // Server
         void UpdateServer(double time, float deltaTime);
         void ProcessServerMessages();
+        void ProcessChunkQueue(int clientIndex);
         void BroadcastPlayerPosition(uint32_t playerId, const glm::vec3& position, float yaw, float pitch);
+        void OnClientConnected(int clientIndex);
 
         // Client
         void UpdateClient(double time, float deltaTime);
@@ -107,11 +116,21 @@ namespace MinecraftClone
         // Server
         std::unique_ptr<yojimbo::Server> m_server;
         std::unordered_map<uint32_t, glm::vec3> m_playerPositions;  // Server tracks all players
+        std::unordered_map<int, std::unordered_set<std::pair<int, int>, ChunkCoordHash>> m_clientChunksSent;  // Track which chunks each client has received
+
+        // Chunk sending queue (to avoid flooding the reliable channel)
+        struct PendingChunkSlice
+        {
+            int chunkX;
+            int chunkZ;
+            uint8_t sliceY;
+        };
+        std::unordered_map<int, std::queue<PendingChunkSlice>> m_clientChunkQueue;  // Queue of slices to send per client
 
         // Client
         std::unique_ptr<yojimbo::Client> m_client;
-
         std::unordered_map<uint32_t, RemotePlayer> m_remotePlayers;  // Client-side view of other players
+        std::unordered_map<std::pair<int, int>, std::bitset<16>, ChunkCoordHash> m_clientChunkSlicesReceived;  // Track which slices each client has received
 
         bool m_isServer;
         uint32_t m_localPlayerId;
