@@ -170,6 +170,8 @@ add_executable(${PROJECT_NAME}
         include/World/Raycast.h
         src/World/BlockInteraction.cpp
         include/World/BlockInteraction.h
+        src/Audio/SoundManager.cpp
+        include/Audio/SoundManager.h
         include/Networking/NetworkMessages.h
         src/Networking/NetworkManager.cpp
         include/Networking/NetworkManager.h

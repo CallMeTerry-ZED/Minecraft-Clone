@@ -130,13 +130,19 @@ namespace MinecraftClone
         // Create collision mesh from chunk blocks (only exposed faces)
         btTriangleMesh* mesh = new btTriangleMesh();
 
+        // OPTIMIZATION: Pre-compute neighbor chunks to avoid repeated lookups (same as mesh generation)
+        Chunk* neighborChunks[4] = { nullptr, nullptr, nullptr, nullptr }; // Front, Back, Left, Right
+        neighborChunks[0] = world->GetChunk(chunkX, chunkZ + 1);     // Front (+Z)
+        neighborChunks[1] = world->GetChunk(chunkX, chunkZ - 1);     // Back (-Z)
+        neighborChunks[2] = world->GetChunk(chunkX - 1, chunkZ);     // Left (-X)
+        neighborChunks[3] = world->GetChunk(chunkX + 1, chunkZ);     // Right (+X)
+
         // Helper function to check if a face should have collision
+        // IMPORTANT: If neighbor chunk doesn't exist, we should still add collision to prevent falling through
         auto ShouldAddFaceCollision = [&](int x, int y, int z, int faceIndex) -> bool {
             int neighborX = x;
             int neighborY = y;
             int neighborZ = z;
-            int neighborChunkX = chunkX;
-            int neighborChunkZ = chunkZ;
 
             switch (faceIndex)
             {
@@ -144,32 +150,62 @@ namespace MinecraftClone
                     neighborZ++;
                     if (neighborZ >= CHUNK_SIZE_Z)
                     {
-                        neighborZ = 0;
-                        neighborChunkZ++;
+                        // Check neighbor chunk
+                        if (neighborChunks[0])
+                        {
+                            const Block& neighborBlock = neighborChunks[0]->GetBlock(x, y, 0);
+                            return neighborBlock.IsAir() || neighborBlock.IsTransparent();
+                        }
+                        else
+                        {
+                            // Neighbor chunk not loaded - add collision to be safe (prevent falling through)
+                            return true;
+                        }
                     }
                     break;
                 case 1: // Back (-Z)
                     neighborZ--;
                     if (neighborZ < 0)
                     {
-                        neighborZ = CHUNK_SIZE_Z - 1;
-                        neighborChunkZ--;
+                        if (neighborChunks[1])
+                        {
+                            const Block& neighborBlock = neighborChunks[1]->GetBlock(x, y, CHUNK_SIZE_Z - 1);
+                            return neighborBlock.IsAir() || neighborBlock.IsTransparent();
+                        }
+                        else
+                        {
+                            return true; // Neighbor not loaded - add collision
+                        }
                     }
                     break;
                 case 2: // Left (-X)
                     neighborX--;
                     if (neighborX < 0)
                     {
-                        neighborX = CHUNK_SIZE_X - 1;
-                        neighborChunkX--;
+                        if (neighborChunks[2])
+                        {
+                            const Block& neighborBlock = neighborChunks[2]->GetBlock(CHUNK_SIZE_X - 1, y, z);
+                            return neighborBlock.IsAir() || neighborBlock.IsTransparent();
+                        }
+                        else
+                        {
+                            return true; // Neighbor not loaded - add collision
+                        }
                     }
                     break;
                 case 3: // Right (+X)
                     neighborX++;
                     if (neighborX >= CHUNK_SIZE_X)
                     {
-                        neighborX = 0;
-                        neighborChunkX++;
+                        if (neighborChunks[3])
+                        {
+                            const Block& neighborBlock = neighborChunks[3]->GetBlock(0, y, z);
+                            return neighborBlock.IsAir() || neighborBlock.IsTransparent();
+                        }
+                        else
+                        {
+                            return true; // Neighbor not loaded - add collision
+                        }
                     }
                     break;
                 case 4: // Top (+Y)
@@ -188,18 +224,9 @@ namespace MinecraftClone
                     break;
             }
 
-            // Check if neighbor is in different chunk
-            if (neighborChunkX != chunkX || neighborChunkZ != chunkZ)
-            {
-                glm::ivec3 worldPos = Chunk::LocalToWorld(neighborChunkX, neighborChunkZ, neighborX, neighborY, neighborZ);
-                const Block& neighborBlock = world->GetBlock(worldPos.x, worldPos.y, worldPos.z);
-                return neighborBlock.IsAir() || neighborBlock.IsTransparent();
-            }
-            else
-            {
-                const Block& neighborBlock = chunk->GetBlock(neighborX, neighborY, neighborZ);
-                return neighborBlock.IsAir() || neighborBlock.IsTransparent();
-            }
+            // Neighbor is in same chunk
+            const Block& neighborBlock = chunk->GetBlock(neighborX, neighborY, neighborZ);
+            return neighborBlock.IsAir() || neighborBlock.IsTransparent();
         };
 
         // Iterate through all blocks in chunk

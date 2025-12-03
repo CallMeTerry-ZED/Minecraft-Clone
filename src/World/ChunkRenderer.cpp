@@ -6,12 +6,13 @@
 #include "World/ChunkMeshGenerator.h"
 #include "World/World.h"
 #include "Rendering/BlockTextureRegistry.h"
+#include "Rendering/Frustum.h"
 #include <spdlog/spdlog.h>
 #include <set>
 
 namespace MinecraftClone
 {
-    ChunkRenderer::ChunkRenderer() : m_textureArrayID(0)
+    ChunkRenderer::ChunkRenderer()
     {
     }
 
@@ -94,64 +95,16 @@ void main()
         // Initialize texture registry
         BlockTextureRegistry::Initialize();
 
-        // Load all unique textures
-        std::set<std::string> uniquePaths;
-        std::vector<std::string> orderedPaths; // Keep order for texture array
-        for (int type = 0; type < static_cast<int>(BlockType::Count); type++)
+        // Load texture atlas
+        std::string atlasPath = "assets/textures/block_atlas.png";
+        m_atlasTexture = std::make_unique<Texture>();
+        if (!m_atlasTexture->LoadFromFile(atlasPath))
         {
-            for (int face = 0; face < 6; face++)
-            {
-                std::string path = BlockTextureRegistry::GetTexturePath(
-                    static_cast<BlockType>(type),
-                    static_cast<BlockFace>(face)
-                );
-                if (uniquePaths.find(path) == uniquePaths.end())
-                {
-                    uniquePaths.insert(path);
-                    orderedPaths.push_back(path);
-                }
-            }
+            spdlog::error("Failed to load texture atlas: {}", atlasPath);
+            return false;
         }
 
-        // Load each unique texture
-        for (const auto& path : orderedPaths)
-        {
-            if (m_textures.find(path) == m_textures.end())
-            {
-                auto texture = std::make_unique<Texture>();
-                if (texture->LoadFromFile(path))
-                {
-                    m_textures[path] = std::move(texture);
-                }
-            }
-        }
-
-        // Create mapping from block+face to texture path, then to index
-        std::unordered_map<std::string, uint32_t> pathToIndex;
-        uint32_t index = 0;
-        for (const auto& path : orderedPaths)
-        {
-            pathToIndex[path] = index++;
-        }
-
-        // Map block type + face to texture index
-        for (int type = 0; type < static_cast<int>(BlockType::Count); type++)
-        {
-            for (int face = 0; face < 6; face++)
-            {
-                std::string path = BlockTextureRegistry::GetTexturePath(
-                    static_cast<BlockType>(type),
-                    static_cast<BlockFace>(face)
-                );
-                uint32_t key = (static_cast<uint32_t>(type) << 8) | static_cast<uint32_t>(face);
-                if (pathToIndex.find(path) != pathToIndex.end())
-                {
-                    m_textureIndices[key] = pathToIndex[path];
-                }
-            }
-        }
-
-        spdlog::info("Loaded {} unique textures", m_textures.size());
+        spdlog::info("Loaded texture atlas: {}", atlasPath);
 
         return true;
     }
@@ -168,6 +121,12 @@ void main()
         m_chunkMeshes[key] = std::move(mesh);
     }
 
+    void ChunkRenderer::SetChunkMesh(int chunkX, int chunkZ, std::unique_ptr<ChunkMesh> mesh)
+    {
+        auto key = std::make_pair(chunkX, chunkZ);
+        m_chunkMeshes[key] = std::move(mesh);
+    }
+
     void ChunkRenderer::RenderChunks(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
     {
         if (!m_shader)
@@ -175,20 +134,16 @@ void main()
             return;
         }
 
+        // Extract frustum planes from view-projection matrix for culling
+        glm::mat4 viewProjection = projectionMatrix * viewMatrix;
+        m_frustum.ExtractPlanes(viewProjection);
+
         m_shader->Use();
 
-        // Bind a default texture (use stone texture as it's common)
-        // For proper per-face textures, we'd need texture arrays or separate draw calls
-        // For now, bind a visible texture instead of the first one in the map
-        std::string defaultTexturePath = BlockTextureRegistry::GetTexturePath(BlockType::Stone, BlockFace::Front);
-        if (m_textures.find(defaultTexturePath) != m_textures.end())
+        // Bind texture atlas
+        if (m_atlasTexture)
         {
-            m_textures[defaultTexturePath]->Bind(0);
-        }
-        else if (!m_textures.empty())
-        {
-            // Fallback to first available texture
-            m_textures.begin()->second->Bind(0);
+            m_atlasTexture->Bind(0);
         }
         m_shader->SetInt("blockTexture", 0);
 
@@ -201,11 +156,52 @@ void main()
         m_shader->SetVec3("lightColor", lightColor);
         m_shader->SetVec3("viewPos", viewPos);
 
+        int chunksRendered = 0;
+        int chunksCulled = 0;
+
         for (auto& [coord, mesh] : m_chunkMeshes)
         {
             if (mesh && !mesh->IsEmpty())
             {
-                mesh->Render(viewMatrix, projectionMatrix, m_shader.get());
+                // Calculate chunk bounding box in world space
+                int chunkX = coord.first;
+                int chunkZ = coord.second;
+                
+                // Chunk spans from (chunkX * 16, 0, chunkZ * 16) to ((chunkX + 1) * 16, 256, (chunkZ + 1) * 16)
+                glm::vec3 chunkMin(
+                    static_cast<float>(chunkX * CHUNK_SIZE_X),
+                    0.0f,
+                    static_cast<float>(chunkZ * CHUNK_SIZE_Z)
+                );
+                glm::vec3 chunkMax(
+                    static_cast<float>((chunkX + 1) * CHUNK_SIZE_X),
+                    static_cast<float>(CHUNK_SIZE_Y),
+                    static_cast<float>((chunkZ + 1) * CHUNK_SIZE_Z)
+                );
+
+                // Test if chunk is visible in frustum
+                if (m_frustum.IsAABBVisible(chunkMin, chunkMax))
+                {
+                    mesh->Render(viewMatrix, projectionMatrix, m_shader.get());
+                    chunksRendered++;
+                }
+                else
+                {
+                    chunksCulled++;
+                }
+            }
+        }
+
+        // Log culling stats occasionally (every 60 frames or so)
+        static int frameCount = 0;
+        if (++frameCount % 60 == 0)
+        {
+            int totalChunks = chunksRendered + chunksCulled;
+            if (totalChunks > 0)
+            {
+                float cullRatio = (static_cast<float>(chunksCulled) / static_cast<float>(totalChunks)) * 100.0f;
+                spdlog::info("Frustum culling: {} rendered, {} culled ({:.1f}% culled)", 
+                    chunksRendered, chunksCulled, cullRatio);
             }
         }
 
@@ -237,20 +233,11 @@ void main()
         }
         m_chunkMeshes.clear();
         
-        // Clean up textures
-        for (auto& [path, texture] : m_textures)
+        // Clean up atlas texture
+        if (m_atlasTexture)
         {
-            if (texture)
-            {
-                texture->Shutdown();
-            }
-        }
-        m_textures.clear();
-        
-        if (m_textureArrayID != 0)
-        {
-            glDeleteTextures(1, &m_textureArrayID);
-            m_textureArrayID = 0;
+            m_atlasTexture->Shutdown();
+            m_atlasTexture.reset();
         }
         
         m_shader.reset();

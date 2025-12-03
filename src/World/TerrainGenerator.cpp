@@ -124,7 +124,7 @@ namespace MinecraftClone
         }
     }
 
-    void TerrainGenerator::GenerateChunk(Chunk* chunk, int chunkX, int chunkZ, World* world)
+    void TerrainGenerator::GenerateChunk(Chunk* chunk, int chunkX, int chunkZ, World* /*world*/)
     {
         if (!chunk)
         {
@@ -144,18 +144,38 @@ namespace MinecraftClone
         int worldStartX = chunkX * CHUNK_SIZE_X;
         int worldStartZ = chunkZ * CHUNK_SIZE_Z;
 
-        // Generate height map using 2D grid
-        for (int z = 0; z < HEIGHTMAP_SIZE; z++)
+        // OPTIMIZATION 1: Batch noise generation using GenUniformGrid2D
+        // Generate entire heightmap in 2 calls instead of 289 individual calls
+        std::vector<float> heightNoiseData(HEIGHTMAP_SIZE * HEIGHTMAP_SIZE);
+        std::vector<float> detailNoiseData(HEIGHTMAP_SIZE * HEIGHTMAP_SIZE);
+
+        // Generate height noise (frequency 0.01)
+        m_heightNoise->GenUniformGrid2D(
+            heightNoiseData.data(),
+            worldStartX, worldStartZ,
+            HEIGHTMAP_SIZE, HEIGHTMAP_SIZE,
+            0.01f, m_seed
+        );
+
+        // Generate detail noise (frequency 0.05)
+        m_detailNoise->GenUniformGrid2D(
+            detailNoiseData.data(),
+            worldStartX, worldStartZ,
+            HEIGHTMAP_SIZE, HEIGHTMAP_SIZE,
+            0.05f, m_seed + 1000
+        );
+
+        // Combine noises to create heightmap
+        for (int i = 0; i < HEIGHTMAP_SIZE * HEIGHTMAP_SIZE; i++)
         {
-            for (int x = 0; x < HEIGHTMAP_SIZE; x++)
-            {
-                int worldX = worldStartX + x;
-                int worldZ = worldStartZ + z;
-                heightMap[z * HEIGHTMAP_SIZE + x] = static_cast<float>(GetHeightAt(worldX, worldZ));
-            }
+            float combinedNoise = heightNoiseData[i] + (detailNoiseData[i] * 0.3f);
+            int height = m_baseHeight + static_cast<int>(combinedNoise * m_heightVariation);
+            height = std::max(m_seaLevel - 10, std::min(height, 200));
+            heightMap[i] = static_cast<float>(height);
         }
 
-        // Fill chunk with blocks based on height map
+        // OPTIMIZATION 2: Optimize terrain filling
+        // Fill chunk with blocks based on height map, using batch operations where possible
         for (int z = 0; z < CHUNK_SIZE_Z; z++)
         {
             for (int x = 0; x < CHUNK_SIZE_X; x++)
@@ -169,11 +189,51 @@ namespace MinecraftClone
                 // Average for this block position
                 int height = static_cast<int>((h1 + h2 + h3 + h4) / 4.0f);
 
-                // Fill blocks from bottom to height
-                for (int y = 0; y <= height && y < CHUNK_SIZE_Y; y++)
+                if (height <= 0)
                 {
-                    BlockType blockType = GetBlockTypeForHeight(height, y);
-                    chunk->SetBlock(x, y, z, blockType);
+                    continue; // Skip if no blocks to place
+                }
+
+                // Batch-fill stone layers (most common blocks)
+                int stoneStartY = 0;
+                int stoneEndY = std::min(height - 10, CHUNK_SIZE_Y - 1);
+                if (stoneEndY >= stoneStartY)
+                {
+                    // Fill deep stone layer
+                    for (int y = stoneStartY; y <= stoneEndY; y++)
+                    {
+                        BlockType blockType = (y == 0) ? BlockType::Bedrock : BlockType::Stone;
+                        chunk->SetBlock(x, y, z, blockType);
+                    }
+                }
+
+                // Fill middle stone layer (height - 10 to height - 3)
+                int middleStartY = std::max(stoneEndY + 1, 0);
+                int middleEndY = std::min(height - 3, CHUNK_SIZE_Y - 1);
+                if (middleEndY >= middleStartY)
+                {
+                    for (int y = middleStartY; y <= middleEndY; y++)
+                    {
+                        chunk->SetBlock(x, y, z, BlockType::Stone);
+                    }
+                }
+
+                // Fill dirt layer (height - 3 to height - 1)
+                int dirtStartY = std::max(middleEndY + 1, 0);
+                int dirtEndY = std::min(height - 1, CHUNK_SIZE_Y - 1);
+                if (dirtEndY >= dirtStartY)
+                {
+                    for (int y = dirtStartY; y <= dirtEndY; y++)
+                    {
+                        chunk->SetBlock(x, y, z, BlockType::Dirt);
+                    }
+                }
+
+                // Fill surface layer (height)
+                if (height > 0 && height < CHUNK_SIZE_Y)
+                {
+                    BlockType surfaceType = GetBlockTypeForHeight(height, height);
+                    chunk->SetBlock(x, height, z, surfaceType);
                 }
             }
         }

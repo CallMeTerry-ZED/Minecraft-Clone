@@ -22,7 +22,7 @@ namespace MinecraftClone
 
     private:
         static glm::vec3 GetBlockColor(BlockType type);
-        static bool ShouldRenderFace(Chunk* chunk, int x, int y, int z, int faceIndex, World* world, int chunkX, int chunkZ);
+        static bool ShouldRenderFace(Chunk* chunk, int x, int y, int z, int faceIndex, World* world, int chunkX, int chunkZ, Chunk* neighborChunks[4]);
     };
 }
 

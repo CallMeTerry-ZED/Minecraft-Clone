@@ -32,6 +32,7 @@ namespace MinecraftClone
         void Clear();
         void AddFace(const glm::vec3& position, const glm::vec2& texCoord0, const glm::vec2& texCoord1,
             const glm::vec2& texCoord2, const glm::vec2& texCoord3, const glm::vec3& normal, int faceIndex);
+        void AddQuad(const glm::vec3& position, float width, float height, const glm::vec3& normal, int faceIndex);
         void Build();
         void Render(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix, Shader* shader);
         void Shutdown();

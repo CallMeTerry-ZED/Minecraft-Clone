@@ -4,7 +4,10 @@
 
 #include "World/ChunkManager.h"
 #include "Physics/PhysicsManager.h"
+#include "World/ChunkMeshGenerator.h"
 #include <spdlog/spdlog.h>
+#include <chrono>
+#include <algorithm>
 
 namespace MinecraftClone
 {
@@ -19,7 +22,14 @@ namespace MinecraftClone
         , m_loadDistance(10)    // Keep chunks loaded slightly beyond render distance
         , m_initialized(false)
         , m_lastUpdateTime(0.0f)
+        , m_shouldStopWorkers(false)
     {
+    }
+
+    ChunkManager::~ChunkManager()
+    {
+        // Ensure proper cleanup of worker threads
+        Shutdown();
     }
 
     void ChunkManager::Initialize(World* world, TerrainGenerator* terrainGenerator, ChunkRenderer* chunkRenderer)
@@ -29,7 +39,15 @@ namespace MinecraftClone
         m_chunkRenderer = chunkRenderer;
         m_initialized = true;
 
-        spdlog::info("ChunkManager initialized with render distance: {}, load distance: {}", m_renderDistance, m_loadDistance);
+        // Start worker threads for background chunk generation
+        m_shouldStopWorkers = false;
+        for (int i = 0; i < NUM_WORKER_THREADS; i++)
+        {
+            m_workerThreads.emplace_back(&ChunkManager::WorkerThreadFunction, this);
+        }
+
+        spdlog::info("ChunkManager initialized with render distance: {}, load distance: {}, {} worker threads", 
+                     m_renderDistance, m_loadDistance, NUM_WORKER_THREADS);
     }
 
     void ChunkManager::Update(const glm::vec3& playerPosition, float deltaTime)
@@ -60,6 +78,9 @@ namespace MinecraftClone
 
         // Process queued chunk loading (gradual loading to prevent hangs)
         ProcessChunkQueue();
+        
+        // Process completed meshes from background threads (must be on main thread for OpenGL)
+        ProcessCompletedMeshes();
     }
 
     void ChunkManager::UpdateChunks(const glm::vec3& playerPosition)
@@ -85,15 +106,30 @@ namespace MinecraftClone
             }
         }
 
-        // Queue new chunks for loading (instead of loading immediately)
+        // Queue new chunks for loading (prioritize chunks closer to player)
+        std::vector<std::pair<int, int>> chunksToQueue;
         for (const auto& chunkCoord : chunksToLoad)
         {
-            if (m_loadedChunks.find(chunkCoord) == m_loadedChunks.end() && 
-                m_chunksToLoad.find(chunkCoord) == m_chunksToLoad.end())
+            // Check if already loaded or already queued
+            bool alreadyLoaded = m_loadedChunks.find(chunkCoord) != m_loadedChunks.end();
+            bool alreadyQueued = std::find(m_chunksToLoad.begin(), m_chunksToLoad.end(), chunkCoord) != m_chunksToLoad.end();
+            
+            if (!alreadyLoaded && !alreadyQueued)
             {
-                m_chunksToLoad.insert(chunkCoord);
+                chunksToQueue.push_back(chunkCoord);
             }
         }
+        
+        // Sort by distance from center (closer chunks first)
+        std::sort(chunksToQueue.begin(), chunksToQueue.end(), 
+            [centerChunkX, centerChunkZ](const std::pair<int, int>& a, const std::pair<int, int>& b) {
+                int distA = std::max(std::abs(a.first - centerChunkX), std::abs(a.second - centerChunkZ));
+                int distB = std::max(std::abs(b.first - centerChunkX), std::abs(b.second - centerChunkZ));
+                return distA < distB;
+            });
+        
+        // Add to queue in priority order
+        m_chunksToLoad.insert(m_chunksToLoad.end(), chunksToQueue.begin(), chunksToQueue.end());
 
         // Unload chunks that are too far away
         std::vector<std::pair<int, int>> chunksToUnload;
@@ -122,19 +158,52 @@ namespace MinecraftClone
 
     void ChunkManager::ProcessChunkQueue()
     {
-        // Load a limited number of chunks per frame to prevent hangs
+        // Use frame time budgeting to prevent lag spikes
+        auto startTime = std::chrono::high_resolution_clock::now();
         int chunksLoadedThisFrame = 0;
-        auto it = m_chunksToLoad.begin();
         
-        while (it != m_chunksToLoad.end() && chunksLoadedThisFrame < MAX_CHUNKS_PER_FRAME)
+        while (!m_chunksToLoad.empty() && chunksLoadedThisFrame < MAX_CHUNKS_PER_FRAME)
         {
-            LoadChunk(it->first, it->second);
-            it = m_chunksToLoad.erase(it);
+            // Check if we've exceeded frame time budget
+            auto currentTime = std::chrono::high_resolution_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(currentTime - startTime).count() / 1000.0f;
+            if (elapsed > MAX_FRAME_TIME_MS)
+            {
+                // Stop loading chunks this frame to maintain framerate
+                break;
+            }
+            
+            // Process from front of queue (highest priority)
+            auto chunkCoord = m_chunksToLoad.front();
+            LoadChunk(chunkCoord.first, chunkCoord.second, false);  // Don't add physics immediately
+            m_chunksToLoad.erase(m_chunksToLoad.begin());
             chunksLoadedThisFrame++;
+        }
+        
+        // Process physics collision queue separately (slower, less frequent)
+        ProcessPhysicsQueue();
+    }
+    
+    void ChunkManager::ProcessPhysicsQueue()
+    {
+        // Process physics collision for only 1 chunk per frame (very expensive)
+        if (!m_chunksPendingPhysics.empty() && m_physicsManager)
+        {
+            auto it = m_chunksPendingPhysics.begin();
+            int chunkX = it->first;
+            int chunkZ = it->second;
+            
+            Chunk* chunk = m_world->GetChunk(chunkX, chunkZ);
+            if (chunk)
+            {
+                m_physicsManager->AddChunkCollision(chunk, chunkX, chunkZ, m_world);
+            }
+            
+            m_chunksPendingPhysics.erase(it);
         }
     }
 
-    void ChunkManager::LoadChunk(int chunkX, int chunkZ)
+    void ChunkManager::LoadChunk(int chunkX, int chunkZ, bool addPhysicsImmediately)
     {
         if (!m_world || !m_terrainGenerator || !m_chunkRenderer)
         {
@@ -149,23 +218,23 @@ namespace MinecraftClone
             return;
         }
 
-        // Generate terrain if chunk is empty
-        if (chunk->IsEmpty())
+        // OPTIMIZATION 6: Queue chunk for background generation instead of doing it synchronously
+        bool needsTerrain = chunk->IsEmpty();
+        
         {
-            m_terrainGenerator->GenerateChunk(chunk, chunkX, chunkZ, m_world);
+            std::lock_guard<std::mutex> lock(m_generationQueueMutex);
+            m_generationQueue.push(ChunkGenerationTask(chunkX, chunkZ, needsTerrain));
         }
+        m_generationCondition.notify_one();
 
-        // Update mesh
-        m_chunkRenderer->UpdateChunk(chunk, chunkX, chunkZ, m_world);
-
-        // Add physics collision
-        if (m_physicsManager)
-        {
-            m_physicsManager->AddChunkCollision(chunk, chunkX, chunkZ, m_world);
-        }
-
-        // Mark as loaded
+        // Mark as loaded (will be finalized when mesh is ready)
         m_loadedChunks.insert(std::make_pair(chunkX, chunkZ));
+        
+        // Add physics collision to pending queue (will be processed when mesh is ready)
+        if (m_physicsManager && !addPhysicsImmediately)
+        {
+            m_chunksPendingPhysics.insert(std::make_pair(chunkX, chunkZ));
+        }
     }
 
     void ChunkManager::UnloadChunk(int chunkX, int chunkZ)
@@ -180,6 +249,9 @@ namespace MinecraftClone
         {
             m_physicsManager->RemoveChunkCollision(chunkX, chunkZ);
         }
+
+        // Remove from physics pending queue if present
+        m_chunksPendingPhysics.erase(std::make_pair(chunkX, chunkZ));
 
         // Unload from renderer
         m_chunkRenderer->UnloadChunk(chunkX, chunkZ);
@@ -213,6 +285,19 @@ namespace MinecraftClone
 
     void ChunkManager::Shutdown()
     {
+        // Stop worker threads
+        m_shouldStopWorkers = true;
+        m_generationCondition.notify_all();
+        
+        for (auto& thread : m_workerThreads)
+        {
+            if (thread.joinable())
+            {
+                thread.join();
+            }
+        }
+        m_workerThreads.clear();
+
         // Unload all chunks
         std::vector<std::pair<int, int>> chunksToUnload(m_loadedChunks.begin(), m_loadedChunks.end());
         for (const auto& chunkCoord : chunksToUnload)
@@ -222,8 +307,109 @@ namespace MinecraftClone
 
         m_loadedChunks.clear();
         m_chunksToLoad.clear();
+        m_chunksPendingPhysics.clear();
         m_initialized = false;
 
         spdlog::info("ChunkManager shut down");
+    }
+
+    void ChunkManager::WorkerThreadFunction()
+    {
+        while (!m_shouldStopWorkers)
+        {
+            ChunkGenerationTask task;
+            bool hasTask = false;
+
+            // Get task from queue
+            {
+                std::unique_lock<std::mutex> lock(m_generationQueueMutex);
+                m_generationCondition.wait(lock, [this] { 
+                    return !m_generationQueue.empty() || m_shouldStopWorkers; 
+                });
+
+                if (!m_generationQueue.empty())
+                {
+                    task = m_generationQueue.front();
+                    m_generationQueue.pop();
+                    hasTask = true;
+                }
+            }
+
+            if (!hasTask)
+            {
+                continue;
+            }
+
+            // Get chunk (thread-safe - World should handle this)
+            Chunk* chunk = m_world->GetChunk(task.chunkX, task.chunkZ);
+            if (!chunk)
+            {
+                continue;
+            }
+
+            // Generate terrain if needed (this is thread-safe as long as TerrainGenerator doesn't modify shared state)
+            if (task.needsTerrain && m_terrainGenerator)
+            {
+                m_terrainGenerator->GenerateChunk(chunk, task.chunkX, task.chunkZ, m_world);
+            }
+
+            // Generate mesh (this is thread-safe - ChunkMeshGenerator doesn't modify shared state)
+            // Note: GenerateMesh creates the mesh data but doesn't call Build() yet
+            auto mesh = ChunkMeshGenerator::GenerateMesh(chunk, task.chunkX, task.chunkZ, m_world);
+            
+            // Don't call Build() here - that needs to happen on main thread for OpenGL context
+            // Queue completed mesh for main thread to process
+            {
+                std::lock_guard<std::mutex> lock(m_completedMeshesMutex);
+                m_completedMeshes.push(CompletedChunkMesh(task.chunkX, task.chunkZ, std::move(mesh)));
+            }
+        }
+    }
+
+    void ChunkManager::ProcessCompletedMeshes()
+    {
+        // Process all completed meshes from background threads
+        // This must run on main thread (OpenGL context)
+        std::queue<CompletedChunkMesh> meshesToProcess;
+        
+        {
+            std::lock_guard<std::mutex> lock(m_completedMeshesMutex);
+            meshesToProcess.swap(m_completedMeshes);
+        }
+
+        while (!meshesToProcess.empty())
+        {
+            auto& completed = meshesToProcess.front();
+            
+            // Build mesh on main thread (OpenGL context required)
+            if (completed.mesh)
+            {
+                completed.mesh->Build();
+                
+                // Store mesh directly in renderer (bypass UpdateChunk which would regenerate)
+                if (m_chunkRenderer)
+                {
+                    // Store the pre-built mesh in renderer (mesh is already built on main thread)
+                    m_chunkRenderer->SetChunkMesh(completed.chunkX, completed.chunkZ, std::move(completed.mesh));
+                }
+                
+                // Add physics collision if pending
+                if (m_physicsManager)
+                {
+                    auto it = m_chunksPendingPhysics.find(std::make_pair(completed.chunkX, completed.chunkZ));
+                    if (it != m_chunksPendingPhysics.end())
+                    {
+                        Chunk* chunk = m_world->GetChunk(completed.chunkX, completed.chunkZ);
+                        if (chunk)
+                        {
+                            m_physicsManager->AddChunkCollision(chunk, completed.chunkX, completed.chunkZ, m_world);
+                        }
+                        m_chunksPendingPhysics.erase(it);
+                    }
+                }
+            }
+
+            meshesToProcess.pop();
+        }
     }
 }

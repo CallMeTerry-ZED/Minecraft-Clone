@@ -10,6 +10,7 @@
 #include "World/Chunk.h"
 #include "Rendering/ChunkMesh.h"
 #include "Rendering/Shader.h"
+#include "Rendering/Frustum.h"
 #include "World/World.h"
 #include "Rendering/Texture.h"
 #include "Rendering/BlockTextureRegistry.h"
@@ -28,6 +29,7 @@ namespace MinecraftClone
 
         bool Initialize();
         void UpdateChunk(Chunk* chunk, int chunkX, int chunkZ, World* world);
+        void SetChunkMesh(int chunkX, int chunkZ, std::unique_ptr<ChunkMesh> mesh);  // Set pre-built mesh (for multi-threading)
         void RenderChunks(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
         void UnloadChunk(int chunkX, int chunkZ);
         void Shutdown();
@@ -35,9 +37,8 @@ namespace MinecraftClone
     private:
         std::unique_ptr<Shader> m_shader;
         std::unordered_map<std::pair<int, int>, std::unique_ptr<ChunkMesh>, ChunkCoordHash> m_chunkMeshes;
-        std::unordered_map<std::string, std::unique_ptr<Texture>> m_textures;
-        GLuint m_textureArrayID;
-        std::unordered_map<uint32_t, GLuint> m_textureIndices; // Maps block+face to texture array layer
+        std::unique_ptr<Texture> m_atlasTexture;  // Single texture atlas
+        Frustum m_frustum; // For frustum culling
     };
 }
 

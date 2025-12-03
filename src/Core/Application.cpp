@@ -207,7 +207,7 @@ namespace MinecraftClone
         // Initialize block interaction
         m_blockInteraction = std::make_unique<BlockInteraction>();
         m_blockInteraction->Initialize(m_world.get(), m_chunkRenderer.get(), m_chunkManager.get());
-        m_blockInteraction->SetSelectedBlockType(BlockType::Stone); // Default block to place
+        // Block type will be set by InitializeHotbar() later
 
         // Initialize yojimbo
         if (!InitializeYojimbo())
@@ -257,6 +257,9 @@ namespace MinecraftClone
 
         // Set running flag to true
         m_running = true;
+
+        // Initialize hotbar
+        InitializeHotbar();
 
         spdlog::info("Application initialized successfully!");
         return true;
@@ -586,6 +589,9 @@ namespace MinecraftClone
             ImGui::End();
         }
 
+        // Render hotbar
+        RenderHotbar();
+
         // Render ImGui
         ImGui::Render();
 
@@ -728,6 +734,14 @@ namespace MinecraftClone
             {
                 Input::SetMouseLocked(!Input::IsMouseLocked());
             }
+            // Hotbar selection - number keys 1-9
+            else if (keyEvent.GetKey() >= GLFW_KEY_1 && keyEvent.GetKey() <= GLFW_KEY_9)
+            {
+                int slot = keyEvent.GetKey() - GLFW_KEY_1;  // Convert key to slot index (0-8)
+                m_currentHotbarSlot = slot;
+                UpdateHotbarSelection();
+                spdlog::debug("Hotbar slot {} selected", slot + 1);
+            }
             // F1 - Start server
             else if (keyEvent.GetKey() == GLFW_KEY_F1)
             {
@@ -820,6 +834,32 @@ namespace MinecraftClone
                 }
             }
         }
+        else if (event.GetEventType() == EventType::MouseScrolled)
+        {
+            // Check if ImGui wants mouse input
+            if (m_imguiInitialized && ImGui::GetIO().WantCaptureMouse)
+            {
+                // ImGui is using mouse, skip game input
+                return;
+            }
+
+            MouseScrolledEvent& scrollEvent = static_cast<MouseScrolledEvent&>(event);
+            float yOffset = scrollEvent.GetYOffset();
+
+            // Scroll through hotbar slots
+            if (yOffset > 0)
+            {
+                // Scroll up - move to previous slot
+                m_currentHotbarSlot = (m_currentHotbarSlot - 1 + 9) % 9;
+                UpdateHotbarSelection();
+            }
+            else if (yOffset < 0)
+            {
+                // Scroll down - move to next slot
+                m_currentHotbarSlot = (m_currentHotbarSlot + 1) % 9;
+                UpdateHotbarSelection();
+            }
+        }
         else if (event.GetEventType() == EventType::MouseButtonPressed)
         {
             // Check if ImGui wants mouse input
@@ -841,7 +881,9 @@ namespace MinecraftClone
                 // Right click = place block
                 else if (mouseEvent.GetButton() == GLFW_MOUSE_BUTTON_RIGHT)
                 {
-                    m_blockInteraction->PlaceBlock(m_blockInteraction->GetSelectedBlockType());
+                    BlockType selectedBlock = m_blockInteraction->GetSelectedBlockType();
+                    spdlog::debug("Placing block type: {}", static_cast<int>(selectedBlock));
+                    m_blockInteraction->PlaceBlock(selectedBlock);
                 }
             }
         }
@@ -1004,5 +1046,140 @@ namespace MinecraftClone
         }
 
         spdlog::info("Initial terrain generated! {} chunks", (initialRadius * 2 + 1) * (initialRadius * 2 + 1));
+    }
+
+    void Application::InitializeHotbar()
+    {
+        // Initialize hotbar with common building blocks
+        m_hotbarBlocks[0] = BlockType::Grass;
+        m_hotbarBlocks[1] = BlockType::Dirt;
+        m_hotbarBlocks[2] = BlockType::Stone;
+        m_hotbarBlocks[3] = BlockType::Cobblestone;
+        m_hotbarBlocks[4] = BlockType::Wood;
+        m_hotbarBlocks[5] = BlockType::Sand;
+        m_hotbarBlocks[6] = BlockType::Glass;
+        m_hotbarBlocks[7] = BlockType::Leaves;
+        m_hotbarBlocks[8] = BlockType::Gravel;
+
+        m_currentHotbarSlot = 0;
+        
+        // Set initial block type in block interaction
+        if (m_blockInteraction)
+        {
+            m_blockInteraction->SetSelectedBlockType(m_hotbarBlocks[m_currentHotbarSlot]);
+        }
+
+        spdlog::info("Hotbar initialized with {} slots", m_hotbarBlocks.size());
+    }
+
+    void Application::UpdateHotbarSelection()
+    {
+        // Update block interaction with current hotbar selection
+        if (m_blockInteraction)
+        {
+            BlockType selectedBlock = m_hotbarBlocks[m_currentHotbarSlot];
+            m_blockInteraction->SetSelectedBlockType(selectedBlock);
+            spdlog::debug("Hotbar slot {} selected, block type: {}", m_currentHotbarSlot + 1, static_cast<int>(selectedBlock));
+        }
+    }
+
+    void Application::RenderHotbar()
+    {
+        // Hotbar window at bottom center of screen
+        ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDecoration | 
+                                         ImGuiWindowFlags_NoMove | 
+                                         ImGuiWindowFlags_NoSavedSettings |
+                                         ImGuiWindowFlags_NoFocusOnAppearing |
+                                         ImGuiWindowFlags_NoNav;
+
+        const float HOTBAR_WIDTH = 485.0f;
+        const float HOTBAR_HEIGHT = 80.0f;
+        const float PADDING = 10.0f;
+
+        ImGui::SetNextWindowPos(ImVec2((m_windowWidth - HOTBAR_WIDTH) * 0.5f, m_windowHeight - HOTBAR_HEIGHT - PADDING));
+        ImGui::SetNextWindowSize(ImVec2(HOTBAR_WIDTH, HOTBAR_HEIGHT));
+        ImGui::SetNextWindowBgAlpha(0.7f);
+
+        if (ImGui::Begin("Hotbar", nullptr, window_flags))
+        {
+            // Block name to string helper
+            auto GetBlockName = [](BlockType type) -> const char* {
+                switch (type)
+                {
+                    case BlockType::Grass: return "Grass";
+                    case BlockType::Dirt: return "Dirt";
+                    case BlockType::Stone: return "Stone";
+                    case BlockType::Cobblestone: return "Cobblestone";
+                    case BlockType::Wood: return "Wood";
+                    case BlockType::Sand: return "Sand";
+                    case BlockType::Glass: return "Glass";
+                    case BlockType::Leaves: return "Leaves";
+                    case BlockType::Gravel: return "Gravel";
+                    case BlockType::Water: return "Water";
+                    case BlockType::Bedrock: return "Bedrock";
+                    default: return "Unknown";
+                }
+            };
+
+            // Block color helper (for visual feedback)
+            auto GetBlockColor = [](BlockType type) -> ImVec4 {
+                switch (type)
+                {
+                    case BlockType::Grass: return ImVec4(0.3f, 0.8f, 0.2f, 1.0f);
+                    case BlockType::Dirt: return ImVec4(0.6f, 0.4f, 0.2f, 1.0f);
+                    case BlockType::Stone: return ImVec4(0.5f, 0.5f, 0.5f, 1.0f);
+                    case BlockType::Cobblestone: return ImVec4(0.4f, 0.4f, 0.4f, 1.0f);
+                    case BlockType::Wood: return ImVec4(0.5f, 0.3f, 0.1f, 1.0f);
+                    case BlockType::Sand: return ImVec4(0.9f, 0.8f, 0.5f, 1.0f);
+                    case BlockType::Glass: return ImVec4(0.7f, 0.9f, 1.0f, 0.5f);
+                    case BlockType::Leaves: return ImVec4(0.2f, 0.6f, 0.2f, 1.0f);
+                    case BlockType::Gravel: return ImVec4(0.5f, 0.5f, 0.5f, 1.0f);
+                    case BlockType::Water: return ImVec4(0.2f, 0.4f, 0.8f, 0.6f);
+                    case BlockType::Bedrock: return ImVec4(0.1f, 0.1f, 0.1f, 1.0f);
+                    default: return ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+                }
+            };
+
+            const float SLOT_SIZE = 45.0f;
+
+            for (int i = 0; i < 9; i++)
+            {
+                if (i > 0) ImGui::SameLine();
+
+                ImGui::PushID(i);
+                
+                // Change color if this is the selected slot
+                if (i == m_currentHotbarSlot)
+                {
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.6f, 0.2f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.9f, 0.7f, 0.3f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(1.0f, 0.8f, 0.4f, 1.0f));
+                }
+                else
+                {
+                    ImVec4 blockColor = GetBlockColor(m_hotbarBlocks[i]);
+                    ImGui::PushStyleColor(ImGuiCol_Button, blockColor);
+                    ImVec4 hoverColor = ImVec4(blockColor.x * 1.2f, blockColor.y * 1.2f, blockColor.z * 1.2f, blockColor.w);
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, hoverColor);
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, blockColor);
+                }
+
+                // Make button clickable
+                if (ImGui::Button(GetBlockName(m_hotbarBlocks[i]), ImVec2(SLOT_SIZE, SLOT_SIZE)))
+                {
+                    m_currentHotbarSlot = i;
+                    UpdateHotbarSelection();
+                }
+
+                ImGui::PopStyleColor(3);
+                ImGui::PopID();
+            }
+
+            // Display selected block name below hotbar
+            ImGui::Spacing();
+            ImGui::SetCursorPosX((HOTBAR_WIDTH - ImGui::CalcTextSize(GetBlockName(m_hotbarBlocks[m_currentHotbarSlot])).x) * 0.5f);
+            ImGui::Text("%s", GetBlockName(m_hotbarBlocks[m_currentHotbarSlot]));
+        }
+        ImGui::End();
     }
 }

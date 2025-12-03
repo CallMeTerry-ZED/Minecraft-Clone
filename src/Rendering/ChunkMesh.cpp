@@ -89,6 +89,78 @@ namespace MinecraftClone
         m_indices.push_back(baseIndex + 0);
     }
 
+    void ChunkMesh::AddQuad(const glm::vec3& position, float width, float height, const glm::vec3& normal, int faceIndex)
+    {
+        // Add a quad of arbitrary size (for greedy meshing)
+        // width and height are in block units (1.0 = 1 block)
+        // Standard UV coordinates (0,0 to width,height for texture tiling)
+        glm::vec2 uv0(0.0f, 0.0f);
+        glm::vec2 uv1(width, 0.0f);
+        glm::vec2 uv2(width, height);
+        glm::vec2 uv3(0.0f, height);
+
+        glm::vec3 v0, v1, v2, v3;
+
+        // Calculate quad vertices based on face direction and size
+        // For each face, we need to map width/height to the correct axes
+        switch (faceIndex)
+        {
+            case 0: // Front face (+Z) - width=X, height=Y
+                v0 = position + glm::vec3(0.0f, 0.0f, 1.0f);
+                v1 = position + glm::vec3(width, 0.0f, 1.0f);
+                v2 = position + glm::vec3(width, height, 1.0f);
+                v3 = position + glm::vec3(0.0f, height, 1.0f);
+                break;
+            case 1: // Back face (-Z) - width=X, height=Y
+                v0 = position + glm::vec3(width, 0.0f, 0.0f);
+                v1 = position + glm::vec3(0.0f, 0.0f, 0.0f);
+                v2 = position + glm::vec3(0.0f, height, 0.0f);
+                v3 = position + glm::vec3(width, height, 0.0f);
+                break;
+            case 2: // Left face (-X) - width=Z, height=Y
+                v0 = position + glm::vec3(0.0f, 0.0f, 0.0f);
+                v1 = position + glm::vec3(0.0f, 0.0f, width);
+                v2 = position + glm::vec3(0.0f, height, width);
+                v3 = position + glm::vec3(0.0f, height, 0.0f);
+                break;
+            case 3: // Right face (+X) - width=Z, height=Y
+                v0 = position + glm::vec3(1.0f, 0.0f, width);
+                v1 = position + glm::vec3(1.0f, 0.0f, 0.0f);
+                v2 = position + glm::vec3(1.0f, height, 0.0f);
+                v3 = position + glm::vec3(1.0f, height, width);
+                break;
+            case 4: // Top face (+Y) - width=X, height=Z
+                v0 = position + glm::vec3(0.0f, 1.0f, 0.0f);
+                v1 = position + glm::vec3(0.0f, 1.0f, height);
+                v2 = position + glm::vec3(width, 1.0f, height);
+                v3 = position + glm::vec3(width, 1.0f, 0.0f);
+                break;
+            case 5: // Bottom face (-Y) - width=X, height=Z
+                v0 = position + glm::vec3(0.0f, 0.0f, height);
+                v1 = position + glm::vec3(0.0f, 0.0f, 0.0f);
+                v2 = position + glm::vec3(width, 0.0f, 0.0f);
+                v3 = position + glm::vec3(width, 0.0f, height);
+                break;
+            default:
+                return;
+        }
+
+        unsigned int baseIndex = static_cast<unsigned int>(m_vertices.size());
+
+        m_vertices.push_back({v0, uv0, normal});
+        m_vertices.push_back({v1, uv1, normal});
+        m_vertices.push_back({v2, uv2, normal});
+        m_vertices.push_back({v3, uv3, normal});
+
+        // Add indices for two triangles
+        m_indices.push_back(baseIndex + 0);
+        m_indices.push_back(baseIndex + 1);
+        m_indices.push_back(baseIndex + 2);
+        m_indices.push_back(baseIndex + 2);
+        m_indices.push_back(baseIndex + 3);
+        m_indices.push_back(baseIndex + 0);
+    }
+
     void ChunkMesh::Build()
     {
         if (m_isBuilt)

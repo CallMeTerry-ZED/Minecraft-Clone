@@ -13,6 +13,8 @@
 #include <memory>
 #include <spdlog/spdlog.h>
 #include <queue>
+#include <array>
+#include "World/BlockType.h"
 
 namespace MinecraftClone
 {
@@ -85,6 +87,13 @@ namespace MinecraftClone
 
         // ImGui
         bool m_imguiInitialized = false;
+
+        // Hotbar
+        int m_currentHotbarSlot = 0;  // 0-8
+        std::array<BlockType, 9> m_hotbarBlocks;
+        void InitializeHotbar();
+        void UpdateHotbarSelection();
+        void RenderHotbar();
 
         bool m_running = true;
     };
